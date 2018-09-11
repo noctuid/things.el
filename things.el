@@ -507,15 +507,18 @@ the point is on a THING."
 ;; avy-dowindows is a macro), but they silence flycheck
 (declare-function avy-dowindows "avy")
 (declare-function avy--find-visible-regions "avy")
-(defun things--collect-visible-things (things)
-  "Collect all locations of visible THINGS."
+(defun things--collect-visible-things (things &optional bound-function)
+  "Collect all locations of visible THINGS.
+Only search within the range returned by calling BOUND-FUNCTION for both
+directions. See `things-bound' for an example implementation."
   (unless (listp things)
     (setq things (list things)))
   (let (thing-positions)
     (avy-dowindows current-prefix-arg
       (save-excursion
-        (dolist (visible-region (avy--find-visible-regions (window-start)
-                                                           (window-end)))
+        (dolist (visible-region (avy--find-visible-regions
+                                 (funcall bound-function t)
+                                 (funcall bound-function)))
           (goto-char (car visible-region))
           (let ((current-window (get-buffer-window))
                 thing/pos
@@ -554,22 +557,29 @@ the point is on a THING."
 (defvar avy-style)
 (declare-function avy--process "avy")
 (declare-function avy--style-fn "avy")
-(defun things-avy-seek (things)
-  "Seek to a thing in THINGS using avy."
+(defun things-avy-seek (things &optional bound-function)
+  "Seek to a thing in THINGS using avy.
+Only consider things within the range returned by calling BOUND-FUNCTION for
+both directions. See `things-bound' (the default) for an example
+implementation."
   (if (require 'avy nil t)
-      (let ((positions (things--collect-visible-things things)))
+      (let ((positions (things--collect-visible-things
+                        things
+                        (or bound-function #'things-bound))))
         (if (not positions)
             (progn (message "No things found.")
                    nil)
           (avy--process positions (avy--style-fn avy-style))))
     (error "Avy must be installed to use this functionality")))
 
-(defun things-remote-bounds (things)
+(defun things-remote-bounds (things &optional bound-function)
   "Get the smallest bounds of a thing in THINGS.
-Use avy to select the location of the thing. If successful, return a cons of the
-form (thing . bounds). Otherwise return nil."
+Use avy to select the location of the thing. Only consider things within the
+range returned by calling BOUND-FUNCTION for both directions. See
+`things-bound' (the default) for an example implementation. If successful,
+return a cons of the form (thing . bounds). Otherwise return nil."
   (save-excursion
-    (if (numberp (things-avy-seek things))
+    (if (numberp (things-avy-seek things bound-function))
         (things-bounds things)
       ;; get rid of overlays if necessary
       (keyboard-quit)
