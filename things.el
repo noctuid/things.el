@@ -37,9 +37,9 @@
 ;;; Code:
 (require 'cl-lib)
 (require 'thingatpt)
-;; avy must be loaded at compile time so `avy-do-windows' can be expanded
-;; avy is not necessary at runtime until `things-remote-bounds' is called
-(eval-when-compile
+;; avy must be loaded at compile time so `avy-do-windows' can be expanded avy is
+;; not necessary when loading/evaling until `things-remote-bounds' is called
+(cl-eval-when (compile)
   (require 'avy))
 
 (defgroup things nil
