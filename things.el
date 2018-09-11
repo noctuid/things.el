@@ -664,6 +664,15 @@ form (thing . bounds). Otherwise return nil."
            (setf (cdr bounds) (point))))
     thing/bounds))
 
+(defun things--get-linewise (thing/bounds)
+  "Grow the bounds in THING/BOUNDS to encompass only whole lines."
+  (let ((bounds (cdr thing/bounds)))
+    (goto-char (car bounds))
+    (setf (car bounds) (line-beginning-position))
+    (goto-char (cdr bounds))
+    (setf (cdr bounds) (line-end-position))
+    thing/bounds))
+
 (defun things-get (adjustment thing/bounds)
   "Return the result of calling the specified ADJUSTMENT on THING/BOUNDS.
 If the thing does not have a corresponding ADJUSTMENT function defined, fallback
