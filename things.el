@@ -503,14 +503,51 @@ the point is on a THING."
           (point))
       (car (bounds-of-thing-at-point thing)))))
 
+(defun things--check-predicate (thing predicate)
+  "Go to the beginning of THING and return the result of calling PREDICATE.
+Return non-nil if PREDICATE is nil. When PREDICATE is non-nil, and there is no
+thing at the point, return nil."
+  (if predicate
+      (save-excursion
+        (let ((bounds (bounds-of-thing-at-point thing)))
+          (when bounds
+            (goto-char (car bounds))
+            (funcall predicate))))
+    t))
+
+(cl-defun things-letter-predicate-prompt (n &optional prompt)
+  "Return a predicate function to check the point against characters read in.
+N is the number of characters to read. When it is 0 or less, use `read-string'
+to read as many characters as the user inputs. PROMPT can be specified to
+override the default prompt. Return nil if the user aborts."
+  (let (string)
+    (if (<= n 0)
+        (unless (setq string (read-string (or prompt "chars: ")
+                                          nil nil nil t))
+          (cl-return-from things-letter-predicate-prompt))
+      (while (> n 0)
+        (let ((char (read-char (or prompt
+                                   (format "chars (%s more): %s" n
+                                           (concat (reverse string))))
+                               t)))
+          (unless char
+            (cl-return-from things-letter-predicate-prompt))
+          (push char string)
+          (cl-decf n)))
+      (setq string (concat (nreverse string))))
+    (lambda (&rest _) (looking-at (regexp-quote string)))))
+
 ;; NOTE these are not necessary as avy is loaded at compile time (because
 ;; avy-dowindows is a macro), but they silence flycheck
 (declare-function avy-dowindows "avy")
 (declare-function avy--find-visible-regions "avy")
-(defun things--collect-visible-things (things &optional bound-function)
+(defun things--collect-visible-things (things &optional bound-function predicate)
   "Collect all locations of visible THINGS.
 Only search within the range returned by calling BOUND-FUNCTION for both
-directions. See `things-bound' for an example implementation."
+directions. See `things-bound' for an example implementation. When PREDICATE is
+non-nil, only consider things for which the PREDICATE function returns non-nil
+at the beginning of. See `things--check-predicate' for information on what
+arguments are passed to the PREDICATE."
   (unless (listp things)
     (setq things (list things)))
   (let (thing-positions)
@@ -534,7 +571,8 @@ directions. See `things-bound' for an example implementation."
                        ;; overlay position must be visible
                        (< (car visible-region)
                           overlay-pos
-                          (cdr visible-region)))
+                          (cdr visible-region))
+                       (things--check-predicate (car thing/pos) predicate))
               (push overlay-pos region-thing-positions))
             (while (and (setq thing/pos
                               (things-seek-forward things 1
@@ -545,7 +583,8 @@ directions. See `things-bound' for an example implementation."
                         ;; overlay position must be visible
                         (< (car visible-region)
                            overlay-pos
-                           (cdr visible-region)))
+                           (cdr visible-region))
+                        (things--check-predicate (car thing/pos) predicate))
               (push overlay-pos region-thing-positions))
             (setq thing-positions
                   (append thing-positions
@@ -557,29 +596,35 @@ directions. See `things-bound' for an example implementation."
 (defvar avy-style)
 (declare-function avy--process "avy")
 (declare-function avy--style-fn "avy")
-(defun things-avy-seek (things &optional bound-function)
+(defun things-avy-seek (things &optional bound-function predicate)
   "Seek to a thing in THINGS using avy.
 Only consider things within the range returned by calling BOUND-FUNCTION for
-both directions. See `things-bound' (the default) for an example
-implementation."
+both directions. See `things-bound' (the default) for an example implementation.
+When PREDICATE is non-nil, only consider things for which the PREDICATE function
+returns non-nil at the beginning of. See `things--check-predicate' for
+information on what arguments are passed to the PREDICATE."
   (if (require 'avy nil t)
       (let ((positions (things--collect-visible-things
                         things
-                        (or bound-function #'things-bound))))
+                        (or bound-function #'things-bound)
+                        predicate)))
         (if (not positions)
             (progn (message "No things found.")
                    nil)
           (avy--process positions (avy--style-fn avy-style))))
     (error "Avy must be installed to use this functionality")))
 
-(defun things-remote-bounds (things &optional bound-function)
+(defun things-remote-bounds (things &optional bound-function predicate)
   "Get the smallest bounds of a thing in THINGS.
 Use avy to select the location of the thing. Only consider things within the
 range returned by calling BOUND-FUNCTION for both directions. See
-`things-bound' (the default) for an example implementation. If successful,
-return a cons of the form (thing . bounds). Otherwise return nil."
+`things-bound' (the default) for an example implementation. When PREDICATE is
+non-nil, only consider things for which the PREDICATE function returns non-nil
+at the beginning of. See `things--check-predicate' for information on what
+arguments are passed to the PREDICATE. If successful, return a cons of the
+form (thing . bounds). Otherwise return nil."
   (save-excursion
-    (if (numberp (things-avy-seek things bound-function))
+    (if (numberp (things-avy-seek things bound-function predicate))
         (things-bounds things)
       ;; get rid of overlays if necessary
       (keyboard-quit)
