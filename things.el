@@ -512,7 +512,7 @@ thing at the point, return nil."
         (let ((bounds (bounds-of-thing-at-point thing)))
           (when bounds
             (goto-char (car bounds))
-            (funcall predicate))))
+            (funcall predicate thing))))
     t))
 
 (cl-defun things-letter-predicate-prompt (n &optional prompt)
