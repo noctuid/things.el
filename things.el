@@ -47,6 +47,55 @@
   :group 'convenience
   :prefix "things-")
 
+;; * General Helpers
+;; TODO better name?
+(defmacro things-return-point-if-changed (&rest body)
+  "Run the forms BODY and return the `point' if it has changed."
+  (declare (indent 0))
+  (let ((orig-pos (cl-gensym))
+        (final-pos (cl-gensym)))
+    `(let ((,orig-pos (point)))
+       ,@body
+       (let ((,final-pos (point)))
+         (when (= ,final-pos ,orig-pos)
+           ,final-pos)))))
+
+(defmacro things--run-op-or (thing op-sym count &rest body)
+  "If THING has an OP-SYM property, run it with COUNT.
+Otherwise call FALLBACK-OP with THING and COUNT. If the point moves, return the
+new position. Otherwise return nil."
+  (declare (indent 3))
+  (let ((op (cl-gensym)))
+    `(things-return-point-if-changed
+       (let ((,op (get ,thing ,op-sym)))
+         (if ,op
+             (funcall ,op ,count)
+           ,@body)))))
+
+;; * TODO Default Thingatpt Compatability Layer
+;; there is no consistent way to tell if `forward-thing' succeeded or not by
+;; default (some things return 1, some things return nil, and some things don't
+;; have any special behavior and still move the point on failure)
+
+(cl-defun things-forward (thing &optional (count 1))
+  "Move to the next THING end COUNT times.
+With a negative COUNT, move to the previous THING beginning COUNT times. If
+THING has a things-forward-op property, call it with COUNT. Otherwise just call
+`forward-thing' with COUNT. If able to move at least once, return the new
+position. Otherwise return nil."
+  (things--run-op-or thing 'things-forward-op count
+    (forward-thing thing count)))
+
+(cl-defun things-backward (thing &optional (count 1))
+  "Move to the previous THING beginning COUNT times.
+With a negative COUNT, move to the next THING end COUNT times. If THING has a
+things-forward-op property, call it with a negative COUNT. Otherwise just call
+`forward-thing' with a negative COUNT. If able to move at least once, return the
+new position. Otherwise return nil."
+  (setq count (- count))
+  (things--run-op-or thing 'things-forward-op count
+    (forward-thing thing count)))
+
 ;; * Seeking
 (defun things-bound (&optional backwards)
   "Return the bound to be used when seeking forwards or backwards.
@@ -104,12 +153,10 @@ corresponding to the thing that the point is at the end of."
                   bounds))))))
     (or bounds-at-previous-char bounds)))
 
-(defun things--forward (thing &optional count)
-  "Call THING's things-seek-op or `forward-thing' with COUNT."
-  (let ((forward-op (get thing 'things-seek-op)))
-    (if forward-op
-        (funcall forward-op count)
-      (forward-thing thing count))))
+(defun things--try-seek (thing &optional count)
+  "Call THING's things-seek-op or `things-forward' with COUNT."
+  (things--run-op-or thing 'things-seek-op count
+    (things-forward thing count)))
 
 (defun things--min (&rest numbers)
   "Same as `min' but remove nils from NUMBERS."
@@ -130,7 +177,7 @@ new position. Otherwise return nil."
         (initial-bounds (bounds-of-thing-at-point thing))
         seek-start-pos)
     ;; go to the end of the current or next thing
-    (things--forward thing)
+    (things--try-seek thing)
     ;; using `things--after-seek-bounds' because may have moved to the end of a
     ;; thing that is also at the next thing (e.g. evil-word: "thing|-" or for
     ;; list thing ")|)")
@@ -141,7 +188,7 @@ new position. Otherwise return nil."
       (cl-decf count))
     (cl-dotimes (_ count)
       (let ((pos (point)))
-        (things--forward thing)
+        (things--try-seek thing)
         (when (or (= (point) pos)
                   (> (point) bound))
           (goto-char pos)
@@ -172,14 +219,14 @@ the new position. Otherwise return nil."
         (initial-bounds (bounds-of-thing-at-point thing))
         seek-start-pos)
     ;; go to the current or previous thing beginning
-    (things--forward thing (- count))
+    (things--try-seek thing (- count))
     (if (equal (things--after-seek-bounds thing t) initial-bounds)
         (setq seek-start-pos (point))
       (setq seek-start-pos orig-pos)
       (cl-decf count))
     (cl-dotimes (_ count)
       (let ((pos (point)))
-        (things--forward thing -1)
+        (things--try-seek thing -1)
         (when (or (= (point) pos)
                   (< (point) bound))
           (goto-char pos)
@@ -296,6 +343,59 @@ position). Otherwise return nil."
   "Call `things-seek' with ARGS and \":backward-only t\"."
   (apply #'things-seek (append args (list :backward-only t))))
 
+;; * Extra Motions
+(cl-defun things-alt-forward (thing &optional (count 1))
+  "Move to the next THING beginning COUNT times.
+With a negative COUNT, move to the previous THING end COUNT times. If THING has
+a things-alt-forward-op property, call it with COUNT. Otherwise use the default
+implementation built on top of `things-forward'/`forward-thing'. If able to move
+at least once, return the new position. Otherwise return nil."
+  (things--run-op-or thing 'things-alt-forward-op count
+    (when (things--seek-forward thing count)
+      (let ((bounds (bounds-of-thing-at-point thing)))
+        ;; with properly implemented underlying functions, seeking should
+        ;; always move the point to a thing
+        (when bounds
+          (goto-char (if (cl-plusp count)
+                         (car bounds)
+                       (cdr bounds))))))))
+
+(cl-defun things-alt-backward (thing &optional (count 1))
+  "Move to the previous THING end COUNT times.
+With a negative COUNT, move to the next THING beginning COUNT times. If THING
+has a things-alt-forward-op property, call it with an inverted COUNT. Otherwise
+use the default implementation built on top of `things-forward'/`forward-thing'.
+If able to move at least once, return the new position. Otherwise return nil."
+  (things-alt-forward thing (- count)))
+
+(cl-defun things-forward-begin (thing &optional (count 1))
+  "Move to the next THING beginning COUNT times.
+With a negative COUNT, move to the previous THING beginning COUNT times. If able
+to move at least once, return the new position. Otherwise return nil."
+  (if (cl-plusp count)
+      (things-alt-forward thing count)
+    (things-backward thing count)))
+
+(cl-defun things-backward-begin (thing &optional (count 1))
+  "Move to the previous THING beginning COUNT times.
+With a negative COUNT, move to the next THING beginning COUNT times. If able to
+move at least once, return the new position. Otherwise return nil."
+  (things-forward-begin thing (- count)))
+
+(cl-defun things-forward-end (thing &optional (count 1))
+  "Move to the next THING end COUNT times.
+WIth a negative COUNT, move to the previous THING end COUNT times. If able to
+move at least once, return the new position. Otherwise return nil."
+  (if (cl-plusp count)
+      (things-forward thing count)
+    (things-alt-forward thing count)))
+
+(defun things-backward-end (thing &optional count)
+  "Move to the previous THING end COUNT times.
+With a negative COUNT, move to the next THING end COUNT times. If able to move
+at least once, return the new position. Otherwise return nil."
+  (things-forward-end thing (- count)))
+
 ;; * Bounds at Point
 (defun things--bounds-inside-p (current-bounds bounds)
   "Return whether CURRENT-BOUNDS is inside and not exactly BOUNDS."
@@ -349,7 +449,8 @@ Return a list of conses of the form (thing . bounds) or nil if unsuccesful."
 (defun things-bounds (things &optional current-bounds)
   "Get the smallest bounds of a thing at point in THINGS.
 If CURRENT-BOUNDS is non-nil, only consider bounds that encompass the current
-bounds. Return a cons of the form (thing . bounds) or nil if unsuccessful."
+bounds. If successful, return a cons of the form (thing . bounds). Otherwise
+return nil."
   ;; no bound or checks based on window beginning/end; always should return the
   ;; same bounds for the same point
   (unless (listp things)
@@ -375,7 +476,7 @@ bounds. Return a cons of the form (thing . bounds) or nil if unsuccessful."
 ;; * Bounds Growing
 (defun things-expanded-bounds (things current-bounds count)
   "Using the bounds of THINGS, expand CURRENT-BOUNDS COUNT times.
-If successful, return a cons of the form (thing . bounds). Otherwise return.
+If successful, return a cons of the form (thing . bounds). Otherwise return nil.
 Regardless of COUNT, as long as CURRENT-BOUNDS can be expanded at least once,
 expansion is considered successful."
   (let (final-thing/bounds)
@@ -396,7 +497,7 @@ successful."
   (let ((end (cdr current-bounds)))
     (save-excursion
       (goto-char end)
-      (forward-thing thing count)
+      (things-forward thing count)
       (unless (= (point) end)
         (cons (car current-bounds) (point))))))
 
@@ -409,7 +510,7 @@ once, extension is considered successful."
   (let ((beg (car current-bounds)))
     (save-excursion
       (goto-char beg)
-      (forward-thing thing (- count))
+      (things-forward thing (- count))
       (unless (= (point) beg)
         (cons (point) (cdr current-bounds))))))
 
