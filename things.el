@@ -73,7 +73,7 @@ new position. Otherwise return nil."
            ,@body)))))
 
 ;; * Default Thingatpt Compatability Layer
-(defalias 'thing-bounds-at-point #'bounds-of-thing-at-point
+(defalias 'things-bounds-at-point #'bounds-of-thing-at-point
   "Call `bounds-of-thing-at-point' with THING.
 This exists to encapsulate any extra work things.el might have to do on top of
 `bounds-of-thing-at-point' in the future.")
@@ -86,7 +86,7 @@ to move at least once, return the new position. Otherwise return nil."
   (let ((orig-pos (point)))
     (forward-thing thing count)
     (unless (= (point) orig-pos)
-      (let ((bounds (thing-bounds-at-point thing)))
+      (let ((bounds (things-bounds-at-point thing)))
         (if (and bounds (= (point) (cdr bounds)))
             (point)
           (goto-char orig-pos)
