@@ -72,29 +72,32 @@ new position. Otherwise return nil."
              (funcall ,op ,count)
            ,@body)))))
 
-;; * TODO Default Thingatpt Compatability Layer
-;; there is no consistent way to tell if `forward-thing' succeeded or not by
-;; default (some things return 1, some things return nil, and some things don't
-;; have any special behavior and still move the point on failure)
+;; * Default Thingatpt Compatability Layer
+(defalias 'thing-bounds-at-point #'bounds-of-thing-at-point
+  "Call `bounds-of-thing-at-point' with THING.
+This exists to encapsulate any extra work things.el might have to do on top of
+`bounds-of-thing-at-point' in the future.")
 
 (cl-defun things-forward (thing &optional (count 1))
   "Move to the next THING end COUNT times.
-With a negative COUNT, move to the previous THING beginning COUNT times. If
-THING has a things-forward-op property, call it with COUNT. Otherwise just call
-`forward-thing' with COUNT. If able to move at least once, return the new
-position. Otherwise return nil."
-  (things--run-op-or thing 'things-forward-op count
-    (forward-thing thing count)))
+With a negative COUNT, move to the previous THING beginning COUNT times. Unlike
+`forward-thing', this function has a well-defined behavior on failure. If able
+to move at least once, return the new position. Otherwise return nil."
+  (let ((orig-pos (point)))
+    (forward-thing thing count)
+    (unless (= (point) orig-pos)
+      (let ((bounds (thing-bounds-at-point thing)))
+        (if (and bounds (= (point) (cdr bounds)))
+            (point)
+          (goto-char orig-pos)
+          nil)))))
 
 (cl-defun things-backward (thing &optional (count 1))
   "Move to the previous THING beginning COUNT times.
-With a negative COUNT, move to the next THING end COUNT times. If THING has a
-things-forward-op property, call it with a negative COUNT. Otherwise just call
-`forward-thing' with a negative COUNT. If able to move at least once, return the
-new position. Otherwise return nil."
-  (setq count (- count))
-  (things--run-op-or thing 'things-forward-op count
-    (forward-thing thing count)))
+With a negative COUNT, move to the next THING end COUNT times. Unlike
+`forward-thing', this function has a well-defined behavior on failure. If able
+to move at least once, return the new position. Otherwise return nil."
+  (things-forward thing (- count)))
 
 ;; * Seeking
 (defun things-bound (&optional backwards)
@@ -131,7 +134,7 @@ thing like the evil-word \"-\" in \"word-|word\" or a the end of a list
 \")|)\"), and seeking moved the point to the end of THING (as determined by
 `things--seeks-to-end-p' called with THING and BACKWARD), return the bounds
 corresponding to the thing that the point is at the end of."
-  (let* ((bounds (bounds-of-thing-at-point thing))
+  (let* ((bounds (things-bounds-at-point thing))
          (end (things--seeks-to-end-p thing backward))
          (bounds-at-previous-char
           (when (and end
@@ -144,7 +147,7 @@ corresponding to the thing that the point is at the end of."
                       (= (point) (cdr bounds))))
             (save-excursion
               (backward-char)
-              (let ((bounds (bounds-of-thing-at-point thing)))
+              (let ((bounds (things-bounds-at-point thing)))
                 ;; e.g. should not use previous bounds for (|(; this can only
                 ;; happen when things-seeks-forward-begin is not set correctly
                 (when (and bounds (or (= (point) (cdr bounds))
@@ -172,9 +175,8 @@ new position. Otherwise return nil."
     (things--seek-backward thing count bound)
     (cl-return-from things--seek-forward))
   (setq bound (things--min bound (point-max)))
-
   (let ((orig-pos (point))
-        (initial-bounds (bounds-of-thing-at-point thing))
+        (initial-bounds (things-bounds-at-point thing))
         seek-start-pos)
     ;; go to the end of the current or next thing
     (things--try-seek thing)
@@ -216,7 +218,7 @@ the new position. Otherwise return nil."
     (cl-return-from things--seek-backward))
   (setq bound (things--max bound (point-min)))
   (let ((orig-pos (point))
-        (initial-bounds (bounds-of-thing-at-point thing))
+        (initial-bounds (things-bounds-at-point thing))
         seek-start-pos)
     ;; go to the current or previous thing beginning
     (things--try-seek thing (- count))
@@ -352,7 +354,7 @@ implementation built on top of `things-forward'/`forward-thing'. If able to move
 at least once, return the new position. Otherwise return nil."
   (things--run-op-or thing 'things-alt-forward-op count
     (when (things--seek-forward thing count)
-      (let ((bounds (bounds-of-thing-at-point thing)))
+      (let ((bounds (things-bounds-at-point thing)))
         ;; with properly implemented underlying functions, seeking should
         ;; always move the point to a thing
         (when bounds
@@ -416,7 +418,7 @@ at least once, return the new position. Otherwise return nil."
   "Get all bounds for THINGS at point.
 Return a list of conses of the form (thing . bounds) or nil if unsuccessful."
   (mapcar (lambda (thing)
-            (let ((bounds (bounds-of-thing-at-point thing)))
+            (let ((bounds (things-bounds-at-point thing)))
               (when bounds
                 (cons thing bounds))))
           things))
@@ -602,7 +604,7 @@ the point is on a THING."
         (save-excursion
           (funcall overlay-op)
           (point))
-      (car (bounds-of-thing-at-point thing)))))
+      (car (things-bounds-at-point thing)))))
 
 (defun things--check-predicate (thing predicate)
   "Go to the beginning of THING and return the result of calling PREDICATE.
@@ -610,7 +612,7 @@ Return non-nil if PREDICATE is nil. When PREDICATE is non-nil, and there is no
 thing at the point, return nil."
   (if predicate
       (save-excursion
-        (let ((bounds (bounds-of-thing-at-point thing)))
+        (let ((bounds (things-bounds-at-point thing)))
           (when bounds
             (goto-char (car bounds))
             (funcall predicate thing))))
