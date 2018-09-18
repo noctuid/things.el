@@ -398,6 +398,70 @@ With a negative COUNT, move to the next THING end COUNT times. If able to move
 at least once, return the new position. Otherwise return nil."
   (things-forward-end thing (- count)))
 
+;; * Bounds Adjustment
+(defun things--get-inner (thing/bounds)
+  "Shrink the bounds in THING/BOUNDS by 1 character on each side."
+  (let ((bounds (cdr thing/bounds)))
+    (cl-incf (car bounds))
+    (cl-decf (cdr bounds))
+    thing/bounds))
+
+(defun things--get-inside (thing/bounds)
+  "Shrink the bounds in THING/BOUNDS to exclude whitespace and then newlines."
+  (let ((bounds (cdr thing/bounds)))
+    (goto-char (car bounds))
+    (skip-chars-forward " \t")
+    (skip-chars-forward "\n")
+    (setf (car bounds) (point))
+    (goto-char (cdr bounds))
+    (skip-chars-backward " \t")
+    (skip-chars-backward "\n")
+    (setf (cdr bounds) (point))
+    thing/bounds))
+
+(defun things--get-around (thing/bounds)
+  "Grow the bounds in THING/BOUNDS to include whitespace after or before it."
+  (let ((bounds (cdr thing/bounds)))
+    (goto-char (cdr bounds))
+    (skip-chars-forward " \t")
+    (cond ((= (point) (cdr bounds))
+           (goto-char (car bounds))
+           (skip-chars-backward " \t")
+           (setf (car bounds) (point)))
+          (t
+           (setf (cdr bounds) (point))))
+    thing/bounds))
+
+(defun things--get-linewise (thing/bounds)
+  "Grow the bounds in THING/BOUNDS to encompass only whole lines."
+  (let ((bounds (cdr thing/bounds)))
+    (goto-char (car bounds))
+    (setf (car bounds) (line-beginning-position))
+    (goto-char (cdr bounds))
+    (setf (cdr bounds) (line-end-position))
+    thing/bounds))
+
+(defun things--adjusted-bounds (thing/bounds)
+  "Adjust and return THING/BOUNDS.
+If the thing in THING/BOUNDS specifies an adjustment (e.g. \"(inner comment)\"),
+use the thing's corresponding adjustment function to alter the bounds in
+THING/BOUNDS. If the thing does not have a corresponding ADJUSTMENT function
+defined, fall back to the default one if it exists. If there is no specified
+adjustment or there is no available function for the specified adjustment, just
+return THING/BOUNDS."
+  (let ((thing (car thing/bounds)))
+    (if (listp thing)
+        (let* ((adjustment (car thing))
+               (base-thing (cadr thing))
+               (adjust-function
+                (or (get (intern (format "things-get-%s" adjustment))
+                         base-thing)
+                    (intern (format "things--get-%s" adjustment)))))
+          (if (functionp adjust-function)
+              (funcall adjust-function thing/bounds)
+            thing/bounds))
+      thing/bounds)))
+
 ;; * Bounds at Point
 (defun things--bounds-inside-p (current-bounds bounds)
   "Return whether CURRENT-BOUNDS is inside and not exactly BOUNDS."
@@ -418,7 +482,7 @@ at least once, return the new position. Otherwise return nil."
   "Get all bounds for THINGS at point.
 Return a list of conses of the form (thing . bounds) or nil if unsuccessful."
   (mapcar (lambda (thing)
-            (let ((bounds (things-bounds-at-point thing)))
+            (let ((bounds (things--adjusted-bounds thing)))
               (when bounds
                 (cons thing bounds))))
           things))
@@ -733,64 +797,6 @@ form (thing . bounds). Otherwise return nil."
       (keyboard-quit)
       nil)))
 
-;; * Final Bounds Adjustment
-(defun things--get-inner (thing/bounds)
-  "Shrink the bounds in THING/BOUNDS by 1 character on each side."
-  (let ((bounds (cdr thing/bounds)))
-    (cl-incf (car bounds))
-    (cl-decf (cdr bounds))
-    thing/bounds))
-
-(defun things--get-inside (thing/bounds)
-  "Shrink the bounds in THING/BOUNDS to exclude whitespace and then newlines."
-  (let ((bounds (cdr thing/bounds)))
-    (goto-char (car bounds))
-    (skip-chars-forward " \t")
-    (skip-chars-forward "\n")
-    (setf (car bounds) (point))
-    (goto-char (cdr bounds))
-    (skip-chars-backward " \t")
-    (skip-chars-backward "\n")
-    (setf (cdr bounds) (point))
-    thing/bounds))
-
-(defun things--get-around (thing/bounds)
-  "Grow the bounds in THING/BOUNDS to include whitespace after or before it."
-  (let ((bounds (cdr thing/bounds)))
-    (goto-char (cdr bounds))
-    (skip-chars-forward " \t")
-    (cond ((= (point) (cdr bounds))
-           (goto-char (car bounds))
-           (skip-chars-backward " \t")
-           (setf (car bounds) (point)))
-          (t
-           (setf (cdr bounds) (point))))
-    thing/bounds))
-
-(defun things--get-linewise (thing/bounds)
-  "Grow the bounds in THING/BOUNDS to encompass only whole lines."
-  (let ((bounds (cdr thing/bounds)))
-    (goto-char (car bounds))
-    (setf (car bounds) (line-beginning-position))
-    (goto-char (cdr bounds))
-    (setf (cdr bounds) (line-end-position))
-    thing/bounds))
-
-(defun things-get (adjustment thing/bounds)
-  "Return the result of calling the specified ADJUSTMENT on THING/BOUNDS.
-If the thing does not have a corresponding ADJUSTMENT function defined, fallback
-to the default one if it exists. If there is no available function, just return
-THING/BOUNDS."
-  (let ((adjust-function (or (get (intern (format "things-get-%s" adjustment))
-                                  (car thing/bounds))
-                             (intern (format "things--get-%s" adjustment)))))
-    (if (functionp adjust-function)
-        (funcall adjust-function thing/bounds)
-      thing/bounds)))
-
-;; * Pairs
-;; * Quotes
-;; * Separators
 ;; * Evil Integration
 (declare-function evil-range "evil-common")
 (defun things-evil-range (thing/bounds type)
