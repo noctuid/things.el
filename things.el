@@ -171,7 +171,7 @@ Seek to the next thing if there is an existing thing at the point. If BOUND is
 non-nil, do not seek beyond BOUND. If successful, move the point and return the
 new position. Otherwise return nil."
   (or count (setq count 1))
-  (when (< count 0)
+  (when (cl-minusp count)
     (things--seek-backward thing count bound)
     (cl-return-from things--seek-forward))
   (setq bound (things--min bound (point-max)))
@@ -213,7 +213,7 @@ Seek to the previous thing if there is an existing thing at the point. If BOUND
 is non-nil, do not seek before BOUND. If successful, move the point and return
 the new position. Otherwise return nil."
   (setq count (or count 1))
-  (when (< count 0)
+  (when (cl-minusp count)
     (things--seek-forward thing count bound)
     (cl-return-from things--seek-backward))
   (setq bound (things--max bound (point-min)))
@@ -607,7 +607,7 @@ the point is on a THING."
       (car (things-bounds-at-point thing)))))
 
 (defun things--check-predicate (thing predicate)
-  "Go to the beginning of THING and return the result of calling PREDICATE.
+  "Move to the beginning of THING and return the result of calling PREDICATE.
 Return non-nil if PREDICATE is nil. When PREDICATE is non-nil, and there is no
 thing at the point, return nil."
   (if predicate
@@ -628,7 +628,7 @@ override the default prompt. Return nil if the user aborts."
         (unless (setq string (read-string (or prompt "chars: ")
                                           nil nil nil t))
           (cl-return-from things-letter-predicate-prompt))
-      (while (> n 0)
+      (while (cl-plusp n)
         (let ((char (read-char (or prompt
                                    (format "chars (%s more): %s" n
                                            (concat (reverse string))))
