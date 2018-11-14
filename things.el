@@ -57,7 +57,7 @@
     `(let ((,orig-pos (point)))
        ,@body
        (let ((,final-pos (point)))
-         (when (= ,final-pos ,orig-pos)
+         (unless (= ,final-pos ,orig-pos)
            ,final-pos)))))
 
 (defmacro things--run-op-or (thing op-sym count &rest body)
@@ -481,11 +481,11 @@ return THING/BOUNDS."
 (defun things--bounds (things)
   "Get all bounds for THINGS at point.
 Return a list of conses of the form (thing . bounds) or nil if unsuccessful."
-  (mapcar (lambda (thing)
-            (let ((bounds (things--adjusted-bounds thing)))
-              (when bounds
-                (cons thing bounds))))
-          things))
+  (remove nil (mapcar (lambda (thing)
+                        (let ((bounds (things-bounds-at-point thing)))
+                          (when bounds
+                            (things--adjusted-bounds (cons thing bounds)))))
+                      things)))
 
 (defun things--expanded-bounds (things current-bounds)
   "Get all bounds of THINGS that encompass CURRENT-BOUNDS.
@@ -523,21 +523,22 @@ return nil."
     (setq things (list things)))
   (let* ((all-bounds (if current-bounds
                          (things--expanded-bounds things current-bounds)
-                       (things--bounds things)))
-         (sorted-bounds (cl-sort all-bounds
-                                 ;; favor the smallest bounds
-                                 #'things--bounds-< :key #'cdr))
-         (smallest-size (things--bounds-size (cdar sorted-bounds)))
-         (smallest-bounds
-          ;; take while same size
-          (cl-loop for thing-bounds in sorted-bounds
-                   while (= (things--bounds-size (cdr thing-bounds))
-                            smallest-size)
-                   collect thing-bounds)))
-    (if (<= (length smallest-bounds) 1)
-        (car smallest-bounds)
-      ;; if multiple bounds of same size, favor the one that starts first
-      (car (cl-sort smallest-bounds #'< :key #'cadr)))))
+                       (things--bounds things))))
+    (when all-bounds
+      (let* ((sorted-bounds (cl-sort all-bounds
+                                     ;; favor the smallest bounds
+                                     #'things--bounds-< :key #'cdr))
+             (smallest-size (things--bounds-size (cdar sorted-bounds)))
+             (smallest-bounds
+              ;; take while same size
+              (cl-loop for thing-bounds in sorted-bounds
+                       while (= (things--bounds-size (cdr thing-bounds))
+                                smallest-size)
+                       collect thing-bounds)))
+        (if (<= (length smallest-bounds) 1)
+            (car smallest-bounds)
+          ;; if multiple bounds of same size, favor the one that starts first
+          (car (cl-sort smallest-bounds #'< :key #'cadr)))))))
 
 ;; * Bounds Growing
 (defun things-expanded-bounds (things current-bounds count)
@@ -796,6 +797,212 @@ form (thing . bounds). Otherwise return nil."
       ;; get rid of overlays if necessary
       (keyboard-quit)
       nil)))
+
+;; * Things
+;; ** Helpers
+;;  TODO escape syntax character
+(defvar things-escape-alist
+  '((emacs-lisp-mode . "[?\\]")
+    (t . "\\\\")))
+
+;; TODO use buffer-local variable instead?
+;; TODO see `sp-char-is-escaped-t'
+(defun things--at-escaped-character-p ()
+  "Check if the character after the point is escaped."
+  (let ((escape-regexp
+         (or (cdr (assq major-mode things-escape-alist))
+             (cdr (assq t things-escape-alist)))))
+    ;; TODO handle case like \\\\\\); unlikely but possible
+    (save-match-data
+      (looking-back escape-regexp (line-beginning-position)))))
+
+(defmacro things-with-count (count &rest body)
+  "While COUNT is positive, run BODY.
+If the point does not change after an iteration of body, stop there and leave
+the point as-is. This means that the BODY should move the point on success and
+keep the point as-is on failure."
+  (declare (indent 1) (debug t))
+  (let ((start-pos (cl-gensym)))
+    `(things-return-point-if-changed
+       (cl-dotimes (_ ,count)
+         (let ((,start-pos (point)))
+           ,@body
+           (when (= ,start-pos (point))
+             (cl-return)))))))
+
+(defmacro things--reset-pos-when-nil (&rest body)
+  (declare (indent 0) (debug t))
+  (let ((orig-pos (cl-gensym))
+        (ret (cl-gensym)))
+    `(let* ((,orig-pos (point))
+            (,ret (progn ,@body)))
+       (if ,ret
+           ,ret
+         (goto-char ,orig-pos)
+         nil))))
+
+;; ** Comment
+(defun things--in-comment-p ()
+  "Return whether the point is in a comment.
+If the point is in a comment, return its start position. Return nil if the point
+is at/in a comment starter."
+  (let ((ps (syntax-ppss)))
+    (when (nth 4 ps)
+      (nth 8 ps))))
+
+(defun things--at-comment-start-p ()
+  "Return whether the point is at the beginning of a comment."
+  (save-excursion
+    ;; \\s< is unreliable
+    (and (looking-at comment-start-skip)
+         (goto-char (match-end 0))
+         (things--in-comment-p))))
+
+(defun things--at-block-comment-p ()
+  "Return whether the point is at the beginning of a block comment.
+This function assumes that the point is at the beginning of some type of
+comment."
+  (let ((comment-beg (point)))
+    ;; (and (things--at-comment-start-p) ...)
+    (or
+     ;; one-line block comment
+     (save-excursion
+       (end-of-line)
+       (not (things--in-comment-p)))
+     ;; unnecessary with next check
+     ;; (save-excursion
+     ;;   (forward-comment 1)
+     ;;   (> (- (count-lines comment-beg (point))
+     ;;         (if (bolp) 0 1))
+     ;;      1))
+     ;; multi-line block comment
+     (save-excursion
+       (forward-line)
+       (equal (things--in-comment-p) comment-beg)))))
+
+(defun things--comment-beginning ()
+  "Go to the beginning of the current comment.
+If no comment at the point or at a comment beginning or just after a comment
+end, return nil and do not move the point. This works in the middle of a comment
+starter."
+  (let ((comment-beg
+         (save-excursion
+           ;; (end-of-line)
+           (when (eq (get-text-property (point) 'face)
+                     'font-lock-comment-delimiter-face)
+             (let ((non-comment-starter-pos
+                    (next-single-property-change (point) 'face)))
+               (when non-comment-starter-pos
+                 (goto-char non-comment-starter-pos))))
+           (comment-beginning))))
+    (when (and comment-beg
+               ;; should return nil at first comment starter character
+               (< comment-beg (point)))
+      (goto-char comment-beg))))
+
+(defsubst things--looking-back (regexp)
+  "Forward to (`looking-back' REGEXP (line-beginning-position))."
+  (looking-back regexp (line-beginning-position)))
+
+(defun things--backward-aggregated-comment-begin (count)
+  "Move to the previous aggregated comment beginning COUNT times.
+Line comments that start at the same column and have no code in between them are
+considered to be one \"aggregated\" comment. Block comments are not aggregated.
+The idea is to aggregate adjacent line comments that could be one sentence and
+contain delimiter pairs."
+  (things-with-count count
+    ;; unfortunately, `comment-end-skip' and `block-comment-end' are not always
+    ;; defined, and `comment-end' applies inconsistently to line or block
+    ;; comments; `syntax-ppss' returns nil in the middle of a comment starter;
+    ;; newcomment.el and evilnc both check faces
+    (let ((comment-beg (or (things--comment-beginning)
+                           (things--reset-pos-when-nil
+                             ;; TODO this supposedly does not work in all cases
+                             ;; where a comment starter appears in a comment
+                             (comment-search-backward nil t))))
+          col)
+      (when comment-beg
+        ;; comment search functions skip past comment beginning
+        (goto-char comment-beg)
+        (setq col (current-column))
+        ;; extend comment
+        (when (not (things--at-block-comment-p))
+          (while (and
+                  ;; old comment should not be separated from new comment by
+                  ;; code
+                  (things--looking-back "^[[:space:]]*")
+                  ;; `forward-comment' will work to move the point to a line
+                  ;; comment on the previous line; it will also return nil at
+                  ;; bobp (no extra check necessary)
+                  (things--reset-pos-when-nil
+                    (forward-comment -1))
+                  ;; `forward-comment' still moves the point on failure
+                  (things--at-comment-start-p)
+                  ;; TODO pull this, col check, and maybe space check into
+                  ;; helper for readability the new comment should be on the
+                  ;; previous line
+                  (= (- (count-lines (point) comment-beg)
+                        (if (bolp) 0 1))
+                     1)
+                  ;; the new comment should start at the same column
+                  (= (current-column) col)
+                  ;; the new comment should not be a block comment (one line
+                  ;; block comments are rare but possible)
+                  (not (things--at-block-comment-p)))
+            (setq comment-beg (point))))
+        (goto-char comment-beg)))))
+
+(defun things--forward-aggregated-comment-end (count)
+  "Move to the next aggregated comment end COUNT times.
+Line comments that start at the same column and have no code in between them are
+considered to be one \"aggregated\" comment. Block comments are not aggregated.
+The idea is to aggregate adjacent line comments that could be one sentence and
+contain delimiter pairs."
+  (things-with-count count
+    (let ((comment-beg (or (things--comment-beginning)
+                           (things--reset-pos-when-nil
+                             (comment-search-forward nil t))))
+          new-comment-beg
+          col)
+      (when comment-beg
+        (goto-char comment-beg)
+        (setq col (current-column))
+        ;; extend comment
+        (when (not (things--at-block-comment-p))
+          (while (and
+                  ;; go to comment end (should be guaranteed to work at comment beginning)
+                  (forward-comment 1)
+                  ;; go to next comment beginning
+                  (things--reset-pos-when-nil
+                    (setq new-comment-beg (comment-search-forward nil t)))
+                  (goto-char new-comment-beg)
+                  ;; old comment should not be separated from new comment by
+                  ;; code
+                  (things--looking-back "^[[:space:]]*")
+                  ;; old comment should not be a multi-line comment or separated
+                  ;; from new comment by multiple lines
+                  (= (- (count-lines comment-beg (point))
+                        (if (bolp) 0 1))
+                     1)
+                  ;; new comment should start at the same column
+                  (= (current-column) col)
+                  ;; the new comment should not be a block comment
+                  (not (things--at-block-comment-p)))
+            (setq comment-beg new-comment-beg)))
+        (goto-char comment-beg)
+        (things--reset-pos-when-nil
+          (forward-comment 1))))))
+
+(cl-defun things-forward-aggregated-comment (&optional (count 1))
+  "Move forward across an aggregated comment COUNT times.
+Line comments that start at the same column and have no code in between them are
+considered to be one \"aggregated\" comment. Block comments are not aggregated."
+  (if (cl-plusp count)
+      (things--forward-aggregated-comment-end count)
+    (things--backward-aggregated-comment-begin (- count))))
+(put 'things-aggregated-comment 'forward-op #'things-forward-aggregated-comment)
+(put 'things-aggregated-comment 'things-forward-op
+     #'things-forward-aggregated-comment)
 
 ;; * Evil Integration
 (declare-function evil-range "evil-common")
