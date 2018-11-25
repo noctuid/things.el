@@ -60,6 +60,19 @@
          (unless (= ,final-pos ,orig-pos)
            ,final-pos)))))
 
+(defun things--base-thing (thing)
+  "Return the base thing in THING.
+If THING is in the form (adjustment . thing), discard the adjustment and just
+return the thing."
+  (if (things--adjusted-thing-p thing)
+      (cdr thing)
+    thing))
+
+(defun things--get (thing prop)
+  "Call `get' with the base thing in THING and PROP.
+See `things--base-thing' also."
+  (get (things--base-thing thing) prop))
+
 (defmacro things--run-op-or (thing op-sym count &rest body)
   "If THING has an OP-SYM property, run it with COUNT.
 Otherwise call FALLBACK-OP with THING and COUNT. If the point moves, return the
@@ -67,26 +80,45 @@ new position. Otherwise return nil."
   (declare (indent 3))
   (let ((op (cl-gensym)))
     `(things-return-point-if-changed
-       (let ((,op (get ,thing ,op-sym)))
+       (let ((,op (things--get ,thing ,op-sym)))
          (if ,op
              (funcall ,op ,count)
            ,@body)))))
 
+(defun things--adjusted-thing-p (thing)
+  "Return whether THING is an adjusted thing.
+Return nil if THING is a list of things or a thing without an adjustment.
+Specifically, check if THING is a cons cell of the form (adjustment . thing)."
+  (and (consp thing)
+       (cdr thing)
+       (not (listp (cdr thing)))))
+
+(defun things--make-things-list (things)
+  "Return THINGS as a list.
+If THINGS is already a list of things, return it as-is. If it is a single
+thing (with or without an adjustment), return a new list with it as the only
+item."
+  (if (and (listp things)
+           (not (things--adjusted-thing-p things)))
+      things
+    (list things)))
+
 ;; * Default Thingatpt Compatability Layer
-(defalias 'things-bounds-at-point #'bounds-of-thing-at-point
+(defun things-base-bounds (thing)
   "Call `bounds-of-thing-at-point' with THING.
-This exists to encapsulate any extra work things.el might have to do on top of
-`bounds-of-thing-at-point' in the future.")
+This will ignore the adjustment if THING is of the form (adjustment . thing)."
+  (bounds-of-thing-at-point (things--base-thing thing)))
 
 (cl-defun things-forward (thing &optional (count 1))
   "Move to the next THING end COUNT times.
 With a negative COUNT, move to the previous THING beginning COUNT times. Unlike
 `forward-thing', this function has a well-defined behavior on failure. If able
 to move at least once, return the new position. Otherwise return nil."
+  (setq thing (things--base-thing thing))
   (let ((orig-pos (point)))
     (forward-thing thing count)
     (unless (= (point) orig-pos)
-      (let ((bounds (things-bounds-at-point thing)))
+      (let ((bounds (things-base-bounds thing)))
         (if (and bounds (= (point) (cdr bounds)))
             (point)
           (goto-char orig-pos)
@@ -115,8 +147,8 @@ function can be used by changing the `things-bound' variable."
 If BACKWARD is non-nil, return whether seeking backward for THING goes to the
 thing end."
   (if backward
-      (get thing 'things-seeks-backward-end)
-    (not (get thing 'things-seeks-forward-begin))))
+      (things--get thing 'things-seeks-backward-end)
+    (not (things--get thing 'things-seeks-forward-begin))))
 
 (defun things--move-back (thing &optional backward)
   "Move backward if seeking for THING moved to the thing end.
@@ -134,7 +166,7 @@ thing like the evil-word \"-\" in \"word-|word\" or a the end of a list
 \")|)\"), and seeking moved the point to the end of THING (as determined by
 `things--seeks-to-end-p' called with THING and BACKWARD), return the bounds
 corresponding to the thing that the point is at the end of."
-  (let* ((bounds (things-bounds-at-point thing))
+  (let* ((bounds (things-base-bounds thing))
          (end (things--seeks-to-end-p thing backward))
          (bounds-at-previous-char
           (when (and end
@@ -147,7 +179,7 @@ corresponding to the thing that the point is at the end of."
                       (= (point) (cdr bounds))))
             (save-excursion
               (backward-char)
-              (let ((bounds (things-bounds-at-point thing)))
+              (let ((bounds (things-base-bounds thing)))
                 ;; e.g. should not use previous bounds for (|(; this can only
                 ;; happen when things-seeks-forward-begin is not set correctly
                 (when (and bounds (or (= (point) (cdr bounds))
@@ -158,6 +190,7 @@ corresponding to the thing that the point is at the end of."
 
 (defun things--try-seek (thing &optional count)
   "Call THING's things-seek-op or `things-forward' with COUNT."
+  (setq thing (things--base-thing thing))
   (things--run-op-or thing 'things-seek-op count
     (things-forward thing count)))
 
@@ -176,7 +209,7 @@ new position. Otherwise return nil."
     (cl-return-from things--seek-forward))
   (setq bound (things--min bound (point-max)))
   (let ((orig-pos (point))
-        (initial-bounds (things-bounds-at-point thing))
+        (initial-bounds (things-base-bounds thing))
         seek-start-pos)
     ;; go to the end of the current or next thing
     (things--try-seek thing)
@@ -218,7 +251,7 @@ the new position. Otherwise return nil."
     (cl-return-from things--seek-backward))
   (setq bound (things--max bound (point-min)))
   (let ((orig-pos (point))
-        (initial-bounds (things-bounds-at-point thing))
+        (initial-bounds (things-base-bounds thing))
         seek-start-pos)
     ;; go to the current or previous thing beginning
     (things--try-seek thing (- count))
@@ -253,8 +286,7 @@ the new position. Otherwise return nil."
 See `things-seek' for more information on BOUND-FUNCTION, FORWARD-ONLY,
 BACKWARD-ONLY, PREFER-BACKWARD, and PREFER-CLOSEST. The only difference is that
 `things-seek' additionally supports a count."
-  (unless (listp things)
-    (setq things (list things)))
+  (setq things (things--make-things-list things))
   (let* ((forward-positions
           (unless backward-only
             (mapcar (lambda (thing)
@@ -352,9 +384,10 @@ With a negative COUNT, move to the previous THING end COUNT times. If THING has
 a things-alt-forward-op property, call it with COUNT. Otherwise use the default
 implementation built on top of `things-forward'/`forward-thing'. If able to move
 at least once, return the new position. Otherwise return nil."
+  (setq thing (things--base-thing thing))
   (things--run-op-or thing 'things-alt-forward-op count
     (when (things--seek-forward thing count)
-      (let ((bounds (things-bounds-at-point thing)))
+      (let ((bounds (things-base-bounds thing)))
         ;; with properly implemented underlying functions, seeking should
         ;; always move the point to a thing
         (when bounds
@@ -450,9 +483,9 @@ defined, fall back to the default one if it exists. If there is no specified
 adjustment or there is no available function for the specified adjustment, just
 return THING/BOUNDS."
   (let ((thing (car thing/bounds)))
-    (if (listp thing)
+    (if (things--adjusted-thing-p thing)
         (let* ((adjustment (car thing))
-               (base-thing (cadr thing))
+               (base-thing (cdr thing))
                (adjust-function
                 (or (get (intern (format "things-get-%s" adjustment))
                          base-thing)
@@ -482,7 +515,7 @@ return THING/BOUNDS."
   "Get all bounds for THINGS at point.
 Return a list of conses of the form (thing . bounds) or nil if unsuccessful."
   (remove nil (mapcar (lambda (thing)
-                        (let ((bounds (things-bounds-at-point thing)))
+                        (let ((bounds (things-base-bounds thing)))
                           (when bounds
                             (things--adjusted-bounds (cons thing bounds)))))
                       things)))
@@ -519,8 +552,7 @@ bounds. If successful, return a cons of the form (thing . bounds). Otherwise
 return nil."
   ;; no bound or checks based on window beginning/end; always should return the
   ;; same bounds for the same point
-  (unless (listp things)
-    (setq things (list things)))
+  (setq things (things--make-things-list things))
   (let* ((all-bounds (if current-bounds
                          (things--expanded-bounds things current-bounds)
                        (things--bounds things))))
@@ -602,6 +634,7 @@ Then expand or extend the bounds COUNT - 1 times. If CURRENT-BOUNDS is non-nil,
 expand/extend immediately. If successful, return a cons of the form (thing .
 bounds). Otherwise return nil. Regardless of COUNT, as long as CURRENT-BOUNDS
 can be grown at least once, growing is considered successful."
+  (setq things (things--make-things-list things))
   (let* ((first-thing/bounds (unless current-bounds
                                (cl-decf count)
                                (things-bounds things)))
@@ -664,12 +697,12 @@ Don't seek before BOUND. Return a cons of the form (thing . bounds) or nil."
   "Return the position to display an overlay for the current THING.
 Generally, this will be the beginning of the thing. This function assumes that
 the point is on a THING."
-  (let ((overlay-op (get thing 'targets-overlay-position)))
+  (let ((overlay-op (things--get thing 'targets-overlay-position)))
     (if overlay-op
         (save-excursion
           (funcall overlay-op)
           (point))
-      (car (things-bounds-at-point thing)))))
+      (car (things-base-bounds thing)))))
 
 (defun things--check-predicate (thing predicate)
   "Move to the beginning of THING and return the result of calling PREDICATE.
@@ -677,7 +710,7 @@ Return non-nil if PREDICATE is nil. When PREDICATE is non-nil, and there is no
 thing at the point, return nil."
   (if predicate
       (save-excursion
-        (let ((bounds (things-bounds-at-point thing)))
+        (let ((bounds (things-base-bounds thing)))
           (when bounds
             (goto-char (car bounds))
             (funcall predicate thing))))
@@ -716,8 +749,7 @@ directions. See `things-bound' for an example implementation. When PREDICATE is
 non-nil, only consider things for which the PREDICATE function returns non-nil
 at the beginning of. See `things--check-predicate' for information on what
 arguments are passed to the PREDICATE."
-  (unless (listp things)
-    (setq things (list things)))
+  (setq things (things--make-things-list things))
   (let (thing-positions)
     (avy-dowindows current-prefix-arg
       (save-excursion
