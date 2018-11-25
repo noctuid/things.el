@@ -360,17 +360,18 @@ point, choose based on PREFER-BACKWARD.
 
 If successful, move the point and return a cons of the form (thing . new
 position). Otherwise return nil."
-  (let ((orig-pos (point)))
+  (let (thing/pos)
     (cl-dotimes (_ count)
       ;; (apply #'things--seek things bound-function kargs)
-      (unless (things--seek things bound-function
-                            :forward-only forward-only
-                            :backward-only backward-only
-                            :prefer-backward prefer-backward
-                            :prefer-closest prefer-closest)
-        (cl-return)))
-    (unless (= (point) orig-pos)
-      (point))))
+      (let ((current-thing/pos (things--seek things bound-function
+                                             :forward-only forward-only
+                                             :backward-only backward-only
+                                             :prefer-backward prefer-backward
+                                             :prefer-closest prefer-closest)))
+        (if current-thing/pos
+            (setq thing/pos current-thing/pos)
+          (cl-return))))
+    thing/pos))
 
 (defun things-seek-forward (&rest args)
   "Call `things-seek' with ARGS and \":forward-only t\"."
