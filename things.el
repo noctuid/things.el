@@ -578,14 +578,15 @@ return nil."
 If successful, return a cons of the form (thing . bounds). Otherwise return nil.
 Regardless of COUNT, as long as CURRENT-BOUNDS can be expanded at least once,
 expansion is considered successful."
-  (let (final-thing/bounds)
-    (cl-dotimes (_ count)
-      (let ((expanded-thing/bounds (things-bounds things current-bounds)))
-        (unless expanded-thing/bounds
-          (cl-return))
-        (setq final-thing/bounds expanded-thing/bounds
-              current-bounds (cdr expanded-thing/bounds))))
-    final-thing/bounds))
+  (when current-bounds
+    (let (final-thing/bounds)
+      (cl-dotimes (_ count)
+        (let ((expanded-thing/bounds (things-bounds things current-bounds)))
+          (unless expanded-thing/bounds
+            (cl-return))
+          (setq final-thing/bounds expanded-thing/bounds
+                current-bounds (cdr expanded-thing/bounds))))
+      final-thing/bounds)))
 
 (defun things--extended-bounds-forward (thing current-bounds count)
   "For THING, extend CURRENT-BOUNDS forwards COUNT times.
@@ -593,12 +594,13 @@ Extend CURRENT-BOUNDS by moving from its end to the next THING end COUNT times.
 Return the new bounds if successful. Otherwise return nil. Regardless of COUNT,
 as long as CURRENT-BOUNDS can be extended at least once, extension is considered
 successful."
-  (let ((end (cdr current-bounds)))
-    (save-excursion
-      (goto-char end)
-      (things-forward thing count)
-      (unless (= (point) end)
-        (cons (car current-bounds) (point))))))
+  (when current-bounds
+    (let ((end (cdr current-bounds)))
+      (save-excursion
+        (goto-char end)
+        (things-forward thing count)
+        (unless (= (point) end)
+          (cons (car current-bounds) (point)))))))
 
 (defun things--extended-bounds-backward (thing current-bounds count)
   "For THING, extend CURRENT-BOUNDS backwards COUNT times.
@@ -606,12 +608,13 @@ Extend CURRENT-BOUNDS by moving from its beginning to the previous THING
 beginning COUNT times. Return the new bounds if successful. Otherwise return
 nil. Regardless of COUNT, as long as CURRENT-BOUNDS can be extended at least
 once, extension is considered successful."
-  (let ((beg (car current-bounds)))
-    (save-excursion
-      (goto-char beg)
-      (things-forward thing (- count))
-      (unless (= (point) beg)
-        (cons (point) (cdr current-bounds))))))
+  (when current-bounds
+    (let ((beg (car current-bounds)))
+      (save-excursion
+        (goto-char beg)
+        (things-forward thing (- count))
+        (unless (= (point) beg)
+          (cons (point) (cdr current-bounds)))))))
 
 (defun things-extended-bounds (thing current-bounds count &optional backwards)
   "Extend the bounds of THING starting with CURRENT-BOUNDS COUNT times.
