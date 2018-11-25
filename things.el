@@ -650,7 +650,7 @@ can be grown at least once, growing is considered successful."
 ;; * Bounds with Seeking
 (defun things-seeking-bounds (things &optional current-bounds bound-function)
   "Get the smallest bounds of a thing in THINGS.
-It is recommended to use `things-seeking-growing-bounds' instead unless you
+It is recommended to use `things-growing-or-seeking-bounds' instead unless you
 explicitly do not need/want to support region expansion/extension.
 
 If CURRENT-BOUNDS is non-nil, only consider bounds that encompass
@@ -663,8 +663,8 @@ Otherwise return nil."
         (when (things-seek things 1 (or bound-function #'things-bound))
           (things-bounds things)))))
 
-(defun things-seeking-growing-bounds (things count &optional current-bounds
-                                             bound-function)
+(defun things-growing-or-seeking-bounds (things count &optional current-bounds
+                                                bound-function)
   "Get the smallest bounds of a thing in THINGS.
 Then expand/extend bounds COUNT - 1 times (or COUNT times if CURRENT-BOUNDS is
 non-nil). If no thing at point, seek using `things-seek' and ignore COUNT and
@@ -677,7 +677,7 @@ form (thing . bounds). Otherwise return nil."
           ;; do not attempt to grow with a count after seeking (count
           ;; potentially growing and seeking would be confusing and not very
           ;; useful; remote thing selection would be preferable)
-          (things-bound things)))))
+          (things-bounds things)))))
 
 ;; * Next/Previous Bounds
 (defun things-next-bounds (things count bound)
