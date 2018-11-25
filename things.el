@@ -119,7 +119,10 @@ to move at least once, return the new position. Otherwise return nil."
     (forward-thing thing count)
     (unless (= (point) orig-pos)
       (let ((bounds (things-base-bounds thing)))
-        (if (and bounds (= (point) (cdr bounds)))
+        (if (and bounds
+                 (= (point) (if (cl-plusp count)
+                                (cdr bounds)
+                              (car bounds))))
             (point)
           (goto-char orig-pos)
           nil)))))
@@ -188,7 +191,7 @@ corresponding to the thing that the point is at the end of."
                   bounds))))))
     (or bounds-at-previous-char bounds)))
 
-(defun things--try-seek (thing &optional count)
+(cl-defun things--try-seek (thing &optional (count 1))
   "Call THING's things-seek-op or `things-forward' with COUNT."
   (setq thing (things--base-thing thing))
   (things--run-op-or thing 'things-seek-op count
@@ -683,17 +686,23 @@ form (thing . bounds). Otherwise return nil."
           (things-bounds things)))))
 
 ;; * Next/Previous Bounds
-(defun things-next-bounds (things count bound)
+(cl-defun things-next-bounds (things count &optional
+                                     (bound-function #'things-bound))
   "Seek to the next thing in THINGS COUNT times and get its bounds.
-Don't seek past BOUND. Return a cons of the form (thing . bounds) or nil."
-  (things-seek-forward things count bound)
-  (things-bounds things))
+Don't seek past the BOUND returned by BOUND-FUNCTION. Return a cons of the
+form (thing . bounds) or nil."
+  (save-excursion
+    (things-seek-forward things count bound-function)
+    (things-bounds things)))
 
-(defun things-previous-bounds (things count bound)
+(cl-defun things-previous-bounds (things count &optional
+                                         (bound-function #'things-bound))
   "Seek to the previous thing in THINGS COUNT times and get its bounds.
-Don't seek before BOUND. Return a cons of the form (thing . bounds) or nil."
-  (things-seek-backward things count bound)
-  (things-bounds things))
+Don't seek before the bound returned by BOUND-FUNCTION. Return a cons of the
+form (thing . bounds) or nil."
+  (save-excursion
+    (things-seek-backward things count bound-function)
+    (things-bounds things)))
 
 ;; * Remote Bounds
 (defun things--overlay-position (thing)
