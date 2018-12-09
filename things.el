@@ -845,7 +845,9 @@ form (thing . bounds). Otherwise return nil."
 
 ;; * Things
 ;; ** Helpers
-;;  TODO escape syntax character
+;; TODO this should be part of core Emacs or at least a separate library
+;; TODO escape syntax character
+;; https://github.com/dgutov/highlight-escape-sequences/blob/master/highlight-escape-sequences.el
 (defvar things-escape-alist
   '((emacs-lisp-mode . "[?\\]")
     (t . "\\\\")))
@@ -859,9 +861,9 @@ form (thing . bounds). Otherwise return nil."
              (cdr (assq t things-escape-alist)))))
     ;; TODO handle case like \\\\\\); unlikely but possible
     (save-match-data
-      (looking-back escape-regexp (line-beginning-position)))))
+      (things--looking-back escape-regexp))))
 
-(defmacro things-with-count (count &rest body)
+(defmacro things-move-with-count (count &rest body)
   "While COUNT is positive, run BODY.
 If the point does not change after an iteration of body, stop there and leave
 the point as-is. This means that the BODY should move the point on success and
@@ -955,7 +957,7 @@ Line comments that start at the same column and have no code in between them are
 considered to be one \"aggregated\" comment. Block comments are not aggregated.
 The idea is to aggregate adjacent line comments that could be one sentence and
 contain delimiter pairs."
-  (things-with-count count
+  (things-move-with-count count
     ;; unfortunately, `comment-end-skip' and `block-comment-end' are not always
     ;; defined, and `comment-end' applies inconsistently to line or block
     ;; comments; `syntax-ppss' returns nil in the middle of a comment starter;
@@ -1003,7 +1005,7 @@ Line comments that start at the same column and have no code in between them are
 considered to be one \"aggregated\" comment. Block comments are not aggregated.
 The idea is to aggregate adjacent line comments that could be one sentence and
 contain delimiter pairs."
-  (things-with-count count
+  (things-move-with-count count
     (let ((comment-beg (or (things--comment-beginning)
                            (things--reset-pos-when-nil
                              (comment-search-forward nil t))))
@@ -1046,18 +1048,65 @@ considered to be one \"aggregated\" comment. Block comments are not aggregated."
       (things--forward-aggregated-comment-end count)
     (things--backward-aggregated-comment-begin (- count))))
 (put 'things-aggregated-comment 'forward-op #'things-forward-aggregated-comment)
-(put 'things-aggregated-comment 'things-forward-op
-     #'things-forward-aggregated-comment)
 
-;; * Evil Integration
-(declare-function evil-range "evil-common")
-(defun things-evil-range (thing/bounds type)
-  "Call `evil-range' with the bounds from THING/BOUNDS and TYPE."
-  (let ((bounds (cdr thing/bounds)))
-    (evil-range (car bounds)
-                (cdr bounds)
-                type
-                :expanded t)))
+;; ** String
+(defconst things-string-regexp (rx (1+ (or (syntax string-quote)
+                                           (syntax string-delimiter))))
+  "Regexp to potentially match a string start or end character.")
+
+(defun things--bounds-string ()
+  "Return the bounds of the string at the point or nil.
+This is a slightly modified `lispy--bounds-string'. It will return the bounds
+even if the point is at the very beginning of end of those bounds (inclusive)."
+  (unless (things--in-comment-p)
+    (let ((beg (or (nth 8 (syntax-ppss))
+                   ;; (and (looking-at things-string-regexp)
+                   ;;      (not (things--at-escaped-character-p))
+                   ;;      (point))
+                   (when (looking-at things-string-regexp)
+                     (save-excursion
+                       (forward-char)
+                       (nth 8 (syntax-ppss))))
+                   (when (things--looking-back things-string-regexp)
+                     (save-excursion
+                       (backward-char)
+                       (nth 8 (syntax-ppss)))))))
+      (when (and beg (not (comment-only-p beg (1+ (point)))))
+        (ignore-errors
+          (cons beg (save-excursion
+                      (goto-char beg)
+                      (forward-sexp)
+                      (point))))))))
+(put 'things-string 'bounds-of-thing-at-point #'things--bounds-string)
+
+(defun things--backward-string-begin (count)
+  "Move to the previous string beginning COUNT times."
+  (things-move-with-count count
+    (let ((start-pos (point))
+          bounds)
+      (while (and (re-search-backward things-string-regexp nil t)
+                  (not (setq bounds (things--bounds-string)))))
+      (if bounds
+          (goto-char (car bounds))
+        (goto-char start-pos)))))
+
+(defun things--forward-string-end (count)
+  "Move the next string end COUNT times."
+  (things-move-with-count count
+    (let ((start-pos (point))
+          bounds)
+      (while (and (re-search-forward things-string-regexp nil t)
+                  (not (setq bounds (things--bounds-string)))))
+      (if bounds
+          (goto-char (cdr bounds))
+        (goto-char start-pos)))))
+
+(cl-defun things-forward-string (&optional (count 1))
+  "Move forward across a string COUNT times."
+  (if (cl-plusp count)
+      (things--forward-string-end count)
+    (things--backward-string-begin (- count))))
+(put 'things-string 'forward-op #'things-forward-string)
 
 (provide 'things)
 ;;; things.el ends here
