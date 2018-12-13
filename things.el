@@ -728,7 +728,7 @@ form (thing . bounds) or nil."
   "Return the position to display an overlay for the current THING.
 Generally, this will be the beginning of the thing. This function assumes that
 the point is on a THING."
-  (let ((overlay-op (things--get thing 'targets-overlay-position)))
+  (let ((overlay-op (things--get thing 'things-overlay-position)))
     (if overlay-op
         (save-excursion
           (funcall overlay-op)
