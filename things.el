@@ -139,13 +139,13 @@ to move at least once, return the new position. Otherwise return nil."
   (things-forward thing (- count)))
 
 ;; * Seeking
-(defun things-bound (&optional backwards)
-  "Return the bound to be used when seeking forwards or backwards.
-BACKWARDS specifies that the bound should be for seeking backwards. This
-function is used by bounds functions that use seeking. This default function
-restricts seeking to between the beginning and end of the window. A custom
-function can be used by changing the `things-bound' variable."
-  (if backwards
+(defun things-bound (&optional backward)
+  "Return the bound to be used when seeking forward or backward.
+BACKWARD specifies that the bound should be for seeking backward. This function
+is used by bounds functions that use seeking. This default function restricts
+seeking to between the beginning and end of the window. A custom function can be
+used by changing the `things-bound' variable."
+  (if backward
       (window-start)
     (window-end)))
 
@@ -611,7 +611,7 @@ expansion is considered successful."
       final-thing/bounds)))
 
 (defun things--extended-bounds-forward (thing current-bounds count)
-  "For THING, extend CURRENT-BOUNDS forwards COUNT times.
+  "For THING, extend CURRENT-BOUNDS forward COUNT times.
 Extend CURRENT-BOUNDS by moving from its end to the next THING end COUNT times.
 Return the new bounds if successful. Otherwise return nil. Regardless of COUNT,
 as long as CURRENT-BOUNDS can be extended at least once, extension is considered
@@ -625,7 +625,7 @@ successful."
           (cons (car current-bounds) (point)))))))
 
 (defun things--extended-bounds-backward (thing current-bounds count)
-  "For THING, extend CURRENT-BOUNDS backwards COUNT times.
+  "For THING, extend CURRENT-BOUNDS backward COUNT times.
 Extend CURRENT-BOUNDS by moving from its beginning to the previous THING
 beginning COUNT times. Return the new bounds if successful. Otherwise return
 nil. Regardless of COUNT, as long as CURRENT-BOUNDS can be extended at least
@@ -638,16 +638,16 @@ once, extension is considered successful."
         (unless (= (point) beg)
           (cons (point) (cdr current-bounds)))))))
 
-(defun things-extended-bounds (thing current-bounds count &optional backwards)
+(defun things-extended-bounds (thing current-bounds count &optional backward)
   "Extend the bounds of THING starting with CURRENT-BOUNDS COUNT times.
 Extend CURRENT-BOUNDS by moving from its end to the next THING end COUNT times.
-IF BACKWARDS is non-nil, extend CURRENT-BOUND by moving from its beginning to
-the previous thing beginning COUNT times. If successful, return a cons of the
+IF BACKWARD is non-nil, extend CURRENT-BOUND by moving from its beginning to the
+previous thing beginning COUNT times. If successful, return a cons of the
 form (thing . bounds). Otherwise return nil. Regardless of COUNT, as long as
 CURRENT-BOUNDS can be extended at least once, extension is considered
 successful."
   (let ((extended-bounds
-         (if backwards
+         (if backward
              (things--extended-bounds-backward thing current-bounds count)
            (things--extended-bounds-forward thing current-bounds count))))
     (when extended-bounds
