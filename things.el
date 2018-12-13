@@ -286,6 +286,8 @@ the new position. Otherwise return nil."
   "Return the distance between POS1 and POS2."
   (abs (- pos1 pos2)))
 
+;; TODO document that BOUND-FUNCTION can be nil (same for COUNT below); consider
+;; going all keyword or all optional instead
 (cl-defun things--seek (things bound-function &key
                                forward-only
                                backward-only
@@ -296,6 +298,8 @@ See `things-seek' for more information on BOUND-FUNCTION, FORWARD-ONLY,
 BACKWARD-ONLY, PREFER-BACKWARD, and PREFER-CLOSEST. The only difference is that
 `things-seek' additionally supports a count."
   (setq things (things--make-things-list things))
+  (unless bound-function
+    (setq bound-function (lambda (&rest _))))
   (let* ((forward-positions
           (unless backward-only
             (mapcar (lambda (thing)
@@ -705,20 +709,22 @@ form (thing . bounds). Otherwise return nil."
           (things-bounds things)))))
 
 ;; * Next/Previous Bounds
-(cl-defun things-next-bounds (things count &optional
-                                     (bound-function #'things-bound))
+(defun things-next-bounds (things &optional count bound-function)
   "Seek to the next thing in THINGS COUNT times and get its bounds.
 Don't seek past the BOUND returned by BOUND-FUNCTION. Return a cons of the
 form (thing . bounds) or nil."
+  (unless count
+    (setq count 1))
   (save-excursion
     (things-seek-forward things count bound-function)
     (things-bounds things)))
 
-(cl-defun things-previous-bounds (things count &optional
-                                         (bound-function #'things-bound))
+(defun things-previous-bounds (things &optional count bound-function)
   "Seek to the previous thing in THINGS COUNT times and get its bounds.
 Don't seek before the bound returned by BOUND-FUNCTION. Return a cons of the
 form (thing . bounds) or nil."
+  (unless count
+    (setq count 1))
   (save-excursion
     (things-seek-backward things count bound-function)
     (things-bounds things)))
