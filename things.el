@@ -214,8 +214,8 @@ non-nil, do not seek beyond BOUND. If successful, move the point and return the
 new position. Otherwise return nil."
   (or count (setq count 1))
   (when (cl-minusp count)
-    (things--seek-backward thing count bound)
-    (cl-return-from things--seek-forward))
+    (cl-return-from things--seek-forward
+      (things--seek-backward thing count bound)))
   (setq bound (things--min bound (point-max)))
   (let ((orig-pos (point))
         (initial-bounds (things-base-bounds thing))
@@ -256,8 +256,8 @@ is non-nil, do not seek before BOUND. If successful, move the point and return
 the new position. Otherwise return nil."
   (setq count (or count 1))
   (when (cl-minusp count)
-    (things--seek-forward thing count bound)
-    (cl-return-from things--seek-backward))
+    (cl-return-from things--seek-backward
+      (things--seek-forward thing count bound)))
   (setq bound (things--max bound (point-min)))
   (let ((orig-pos (point))
         (initial-bounds (things-base-bounds thing))
