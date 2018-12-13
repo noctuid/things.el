@@ -109,11 +109,13 @@ item."
 This will ignore the adjustment if THING is of the form (adjustment . thing)."
   (bounds-of-thing-at-point (things--base-thing thing)))
 
-(cl-defun things-forward (thing &optional (count 1))
+(defun things-forward (thing &optional count)
   "Move to the next THING end COUNT times.
 With a negative COUNT, move to the previous THING beginning COUNT times. Unlike
 `forward-thing', this function has a well-defined behavior on failure. If able
 to move at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (setq thing (things--base-thing thing))
   (let ((orig-pos (point)))
     (forward-thing thing count)
@@ -127,11 +129,13 @@ to move at least once, return the new position. Otherwise return nil."
           (goto-char orig-pos)
           nil)))))
 
-(cl-defun things-backward (thing &optional (count 1))
+(defun things-backward (thing &optional count)
   "Move to the previous THING beginning COUNT times.
 With a negative COUNT, move to the next THING end COUNT times. Unlike
 `forward-thing', this function has a well-defined behavior on failure. If able
 to move at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (things-forward thing (- count)))
 
 ;; * Seeking
@@ -191,8 +195,10 @@ corresponding to the thing that the point is at the end of."
                   bounds))))))
     (or bounds-at-previous-char bounds)))
 
-(cl-defun things--try-seek (thing &optional (count 1))
+(defun things--try-seek (thing &optional count)
   "Call THING's things-seek-op or `things-forward' with COUNT."
+  (unless count
+    (setq count 1))
   (setq thing (things--base-thing thing))
   (things--run-op-or thing 'things-seek-op count
     (things-forward thing count)))
@@ -382,12 +388,14 @@ position). Otherwise return nil."
   (apply #'things-seek (append args (list :backward-only t))))
 
 ;; * Extra Motions
-(cl-defun things-alt-forward (thing &optional (count 1))
+(defun things-alt-forward (thing &optional count)
   "Move to the next THING beginning COUNT times.
 With a negative COUNT, move to the previous THING end COUNT times. If THING has
 a things-alt-forward-op property, call it with COUNT. Otherwise use the default
 implementation built on top of `things-forward'/`forward-thing'. If able to move
 at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (setq thing (things--base-thing thing))
   (things--run-op-or thing 'things-alt-forward-op count
     (when (things--seek-forward thing count)
@@ -399,32 +407,40 @@ at least once, return the new position. Otherwise return nil."
                          (car bounds)
                        (cdr bounds))))))))
 
-(cl-defun things-alt-backward (thing &optional (count 1))
+(defun things-alt-backward (thing &optional count)
   "Move to the previous THING end COUNT times.
 With a negative COUNT, move to the next THING beginning COUNT times. If THING
 has a things-alt-forward-op property, call it with an inverted COUNT. Otherwise
 use the default implementation built on top of `things-forward'/`forward-thing'.
 If able to move at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (things-alt-forward thing (- count)))
 
-(cl-defun things-forward-begin (thing &optional (count 1))
+(defun things-forward-begin (thing &optional count)
   "Move to the next THING beginning COUNT times.
 With a negative COUNT, move to the previous THING beginning COUNT times. If able
 to move at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (if (cl-plusp count)
       (things-alt-forward thing count)
     (things-backward thing count)))
 
-(cl-defun things-backward-begin (thing &optional (count 1))
+(defun things-backward-begin (thing &optional count)
   "Move to the previous THING beginning COUNT times.
 With a negative COUNT, move to the next THING beginning COUNT times. If able to
 move at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (things-forward-begin thing (- count)))
 
-(cl-defun things-forward-end (thing &optional (count 1))
+(defun things-forward-end (thing &optional count)
   "Move to the next THING end COUNT times.
-WIth a negative COUNT, move to the previous THING end COUNT times. If able to
+With a negative COUNT, move to the previous THING end COUNT times. If able to
 move at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (if (cl-plusp count)
       (things-forward thing count)
     (things-alt-forward thing count)))
@@ -433,6 +449,8 @@ move at least once, return the new position. Otherwise return nil."
   "Move to the previous THING end COUNT times.
 With a negative COUNT, move to the next THING end COUNT times. If able to move
 at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (things-forward-end thing (- count)))
 
 ;; * Bounds Adjustment
@@ -1040,10 +1058,12 @@ contain delimiter pairs."
         (things--reset-pos-when-nil
           (forward-comment 1))))))
 
-(cl-defun things-forward-aggregated-comment (&optional (count 1))
+(defun things-forward-aggregated-comment (&optional count)
   "Move forward across an aggregated comment COUNT times.
 Line comments that start at the same column and have no code in between them are
 considered to be one \"aggregated\" comment. Block comments are not aggregated."
+  (unless count
+    (setq count 1))
   (if (cl-plusp count)
       (things--forward-aggregated-comment-end count)
     (things--backward-aggregated-comment-begin (- count))))
@@ -1101,8 +1121,10 @@ even if the point is at the very beginning of end of those bounds (inclusive)."
           (goto-char (cdr bounds))
         (goto-char start-pos)))))
 
-(cl-defun things-forward-string (&optional (count 1))
+(defun things-forward-string (&optional count)
   "Move forward across a string COUNT times."
+  (unless count
+    (setq count 1))
   (if (cl-plusp count)
       (things--forward-string-end count)
     (things--backward-string-begin (- count))))
