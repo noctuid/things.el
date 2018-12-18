@@ -816,8 +816,12 @@ arguments are passed to the PREDICATE."
     (avy-dowindows current-prefix-arg
       (save-excursion
         (dolist (visible-region (avy--find-visible-regions
-                                 (funcall bound-function t)
-                                 (funcall bound-function)))
+                                 (if bound-function
+                                     (funcall bound-function t)
+                                   (point-min))
+                                 (if bound-function
+                                     (funcall bound-function)
+                                   (point-max))))
           (goto-char (car visible-region))
           (let ((current-window (get-buffer-window))
                 thing/pos
