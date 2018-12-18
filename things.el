@@ -4,7 +4,7 @@
 ;; URL: https://github.com/noctuid/things.el
 ;; Created: September 8, 2018
 ;; Keywords: convenience, text-object
-;; Package-Requires: ((cl-lib "0.5") (emacs "24.4") (avy "0.4.0"))
+;; Package-Requires: ((cl-lib "0.5") (emacs "24.4") (mmt "0.2.0") (avy "0.4.0"))
 ;; Version: 0.1
 
 ;; This file is not part of GNU Emacs.
@@ -37,6 +37,7 @@
 ;;; Code:
 (require 'cl-lib)
 (require 'thingatpt)
+(require 'mmt)
 ;; avy must be loaded at compile time so `avy-do-windows' can be expanded avy is
 ;; not necessary when loading/evaling until `things-remote-bounds' is called
 (cl-eval-when (compile)
@@ -672,12 +673,13 @@ previous thing beginning COUNT times. If successful, return a cons of the
 form (thing . bounds). Otherwise return nil. Regardless of COUNT, as long as
 CURRENT-BOUNDS can be extended at least once, extension is considered
 successful."
-  (let ((extended-bounds
-         (if backward
-             (things--extended-bounds-backward thing current-bounds count)
-           (things--extended-bounds-forward thing current-bounds count))))
-    (when extended-bounds
-      (cons thing extended-bounds))))
+  (unless (things--get thing 'things-no-extend)
+    (let ((extended-bounds
+           (if backward
+               (things--extended-bounds-backward thing current-bounds count)
+             (things--extended-bounds-forward thing current-bounds count))))
+      (when extended-bounds
+        (cons thing extended-bounds)))))
 
 (defun things-growing-bounds (things count &optional current-bounds)
   "Get the smallest bounds of a thing at point in THINGS.
@@ -692,6 +694,7 @@ can be grown at least once, growing is considered successful."
          (orig-bounds (or current-bounds (cdr first-thing/bounds)))
          (expanded-thing/bounds (things-expanded-bounds things orig-bounds
                                                         count))
+         ;; TODO does multi-thing extension make sense?
          (extended-thing/bounds (when (and (not expanded-thing/bounds)
                                            (= (length things) 1))
                                   (things-extended-bounds (car things)
@@ -1158,5 +1161,177 @@ even if the point is at the very beginning of end of those bounds (inclusive)."
     (things--backward-string-begin (- count))))
 (put 'things-string 'forward-op #'things-forward-string)
 
-(provide 'things)
+;; * Thing Type Definers
+;; These make it easy to automatically implement all necessary functions for
+;; types of things (e.g. things bounded by regexps).
+
+;; ** Helpers
+(cl-defun things-next-regexp (regexp &key backward move skip-past-point
+                                     predicate)
+  "Return the match data of the next position matched by REGEXP.
+If BACKWARD is non-nil, search backward instead of forward. If MOVE is non-nil,
+move to the match instead of returning the match data. By default, move to the
+match end when searching forward and the match end when searching backward. MOVE
+can also be 'begin or 'end to explicitly choose which part of the match to move
+to. When SKIP-PAST-POINT is non-nil, move past an occurence of REGEXP that
+begins at the point before searching. Call PREDICATE (if specified) at each
+match to confirm that the point is at a valid occurrence. For example, the
+predicate could return nil if the point is preceded by an escape character."
+  (save-match-data
+    (let ((start-pos (point))
+          successp)
+      (when (and skip-past-point
+                 (if backward
+                     (things--looking-back regexp)
+                   (looking-at regexp)))
+        (goto-char (if backward
+                       (match-beginning 0)
+                     (match-end 0))))
+      (while (and (if backward
+                      (re-search-backward regexp nil t)
+                    (re-search-forward regexp nil t))
+                  (setq successp t)
+                  (when predicate
+                    (not (funcall predicate))))
+        (setq successp nil))
+      (if successp
+          (if move
+              (goto-char (cl-case move
+                           (begin (match-beginning 0))
+                           (end (match-end 0))
+                           (t (if backward
+                                  (match-beginning 0)
+                                (match-end 0)))))
+            (goto-char start-pos)
+            (match-data))
+        (goto-char start-pos)
+        nil))))
+
+;; ** Pairs
+(defmacro things--with-adjusted-syntax-table (open close &rest body)
+  "With OPEN and CLOSE set to parens in the current syntax table, run BODY."
+  (declare (indent 2))
+  ;; won't be necessary without "abuse" , but use once-only for consistency
+  (mmt-once-only (open close)
+    `(with-syntax-table (copy-syntax-table (syntax-table))
+       (modify-syntax-entry (string-to-char ,open) (format "(%s" ,close))
+       (modify-syntax-entry (string-to-char ,close) (format ")%s" ,open))
+       ,@body)))
+
+(defun things--bounds-of-char-pair-at-point (open close)
+  "Return the bounds of a pair at point bounded by OPEN and CLOSE."
+  ;; NOTE this correctly handles edge situations like (foo (bar)|) 
+  (things--with-adjusted-syntax-table open close
+    (thing-at-point-bounds-of-list-at-point)))
+
+(defun things--forward-char-pair-begin (open close)
+  "Go to the next valid beginning of an OPEN CLOSE pair."
+  (things-next-regexp open
+                      :move 'begin
+                      :skip-past-point t
+                      :predicate
+                      (lambda ()
+                        ;; TODO check whether bounds function should change
+                        ;; match data and whether they currently do
+                        (save-excursion
+                          (save-match-data
+                            (goto-char (match-beginning 0))
+                            (equal (car (things--bounds-of-char-pair-at-point
+                                         open close))
+                                   (point)))))))
+
+(defun things--forward-char-pair-end (open close)
+  "Go to the next valid end of an OPEN CLOSE pair."
+  (things-next-regexp close
+                      :move 'end
+                      :predicate
+                      (lambda ()
+                        (save-match-data
+                          (equal (cdr (things--bounds-of-char-pair-at-point
+                                       open close))
+                                 (point))))))
+
+(defun things--backward-char-pair-begin (open close)
+  "Go to the previous valid beginning of an OPEN CLOSE pair."
+  (things-next-regexp open
+                      :backward t
+                      :move 'begin
+                      :predicate
+                      (lambda ()
+                        (save-match-data
+                          (equal (car (things--bounds-of-char-pair-at-point
+                                       open close))
+                                 (point))))))
+
+(defun things--backward-char-pair-end (open close)
+  "Go to the previous valid end of an OPEN CLOSE pair."
+  (things-next-regexp close
+                      :backward t
+                      :move 'end
+                      :skip-past-point t
+                      :predicate
+                      (lambda ()
+                        (save-excursion
+                          (save-match-data
+                            (goto-char (match-end 0))
+                            (equal (cdr (things--bounds-of-char-pair-at-point
+                                         open close))
+                                   (point)))))))
+
+(defun things--forward-char-pair (open close &optional count)
+  "Go to the next valid end of an OPEN CLOSE pair COUNT times.
+With a negative count, go to the previous valid beginning of the pair."
+  (unless count
+    (setq count 1))
+  (if (cl-plusp count)
+      (things-move-with-count count
+        (things--forward-char-pair-end open close))
+    (things-move-with-count (- count)
+      (things--backward-char-pair-begin open close))))
+
+(defun things--alt-forward-char-pair (open close &optional count)
+  "Go to the next valid beginning of an OPEN CLOSE pair COUNT times.
+With a negative count, go to the previous valid end of the pair."
+  (unless count
+    (setq count 1))
+  (if (cl-plusp count)
+      (things-move-with-count count
+        (things--forward-char-pair-begin open close))
+    (things-move-with-count (- count)
+      (things--backward-char-pair-end open close))))
+
+(defun things--seek-char-pair (open close &optional count)
+  "Go to the next valid beginning of an OPEN CLOSE pair COUNT times.
+With a negative count, go to the previous valid beginning of the pair."
+  (unless count
+    (setq count 1))
+  (if (cl-plusp count)
+      (things-move-with-count count
+        (things--forward-char-pair-begin open close))
+    (things-move-with-count (- count)
+      (things--backward-char-pair-begin open close))))
+
+(defun things-define-pair (name open close)
+  "Create a pair thing called NAME bounded by OPEN and CLOSE."
+  (when (> (length open) 1)
+    (error "Only single character pairs are currently supported"))
+  (when (> (length close) 1)
+    (error "Only single character pairs are currently supported"))
+  (put name 'bounds-of-thing-at-point
+       (lambda ()
+         (things--bounds-of-char-pair-at-point open close)))
+  (put name 'forward-op
+       (lambda (&optional count)
+         (things--forward-char-pair open close count)))
+  (put name 'thigns-alt-forward-op
+       (lambda (&optional count)
+         (things--alt-forward-char-pair open close count)))
+  (put name 'things-seek-op
+       (lambda (&optional count)
+         (things--seek-char-pair open close count)))
+  (put name 'things-seeks-forward-begin t)
+  (put name 'things-no-extend t)
+  (put name 'things-overlay-position #'point)
+  name)
+
 ;;; things.el ends here
