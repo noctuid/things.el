@@ -702,6 +702,7 @@ can be grown at least once, growing is considered successful."
     (or extended-thing/bounds expanded-thing/bounds first-thing/bounds)))
 
 ;; * Bounds with Seeking
+;; TODO add arg to only seek in one direction
 (defun things-seeking-bounds (things &optional current-bounds bound-function)
   "Get the smallest bounds of a thing in THINGS.
 It is recommended to use `things-growing-or-seeking-bounds' instead unless you
@@ -901,9 +902,10 @@ form (thing . bounds). Otherwise return nil."
 ;; TODO this should be part of core Emacs or at least a separate library
 ;; TODO escape syntax character
 ;; https://github.com/dgutov/highlight-escape-sequences/blob/master/highlight-escape-sequences.el
-(defvar things-escape-alist
-  '((emacs-lisp-mode . "[?\\]")
-    (t . "\\\\")))
+(defvar things-escape-alist)
+;; TODO ?( is a character but `up-list', syntax higlighting, etc. don't
+;; consider ? alone an escape character (needs to be ?\<char>)
+'((t . "\\\\"))
 
 ;; TODO use buffer-local variable instead?
 ;; TODO see `sp-char-is-escaped-t'
@@ -930,6 +932,7 @@ keep the point as-is on failure."
            (when (= ,start-pos (point))
              (cl-return)))))))
 
+;; TODO use more? name better?
 (defmacro things--reset-pos-when-nil (&rest body)
   (declare (indent 0) (debug t))
   (let ((orig-pos (cl-gensym))
@@ -942,6 +945,9 @@ keep the point as-is on failure."
          nil))))
 
 ;; ** Comment
+;; TODO most of this should be part of core Emacs (e.g. newcomment.el) or at
+;; least a separate library; ideally there shouldn't be a need to rely on font
+;; faces...
 (defun things--in-comment-p ()
   "Return whether the point is in a comment.
 If the point is in a comment, return its start position. Return nil if the point
