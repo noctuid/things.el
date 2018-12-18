@@ -223,8 +223,8 @@ string, it will be excluded. All keys will be bound to DEF."
        (things-evil-range
         (things-growing-or-seeking-bounds ',adjusted-things
                                           count
-                                          ;; TODO sufficient?
-                                          (when (region-active-p)
+                                          (when (evil-visual-state-p)
+                                            (evil-visual-expand-region)
                                             (car (region-bounds))))
         type))))
 

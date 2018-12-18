@@ -537,8 +537,8 @@ return THING/BOUNDS."
   (< (things--bounds-size bounds1)
      (things--bounds-size bounds2)))
 
-(defun things--bounds (things)
-  "Get all bounds for THINGS at point.
+(defun things--all-bounds (things)
+  "Get the bounds of all the THINGS at the point.
 Return a list of conses of the form (thing . bounds) or nil if unsuccessful."
   (remove nil (mapcar (lambda (thing)
                         (let ((bounds (things-base-bounds thing)))
@@ -546,29 +546,51 @@ Return a list of conses of the form (thing . bounds) or nil if unsuccessful."
                             (things--adjusted-bounds (cons thing bounds)))))
                       things)))
 
-(defun things--expanded-bounds (things current-bounds)
+(defun things--all-base-bounds (things)
+  "Get the base bounds for all the THINGS at the point.
+Return a list of conses of the form (thing . bounds) or nil if unsuccessful."
+  (remove nil (mapcar (lambda (thing)
+                        (let ((bounds (things-base-bounds thing)))
+                          (when bounds
+                            (cons thing bounds))))
+                      things)))
+
+(defun things--all-outer-bounds (things/bounds)
+  "Get the bounds for all things in THINGS/BOUNDS outside the current bounds.
+For every existing thing/bounds, try the corresponding bound function just
+before or after the existing bounds. Return a list of conses of the form (thing
+. bounds) or nil if unsuccessful."
+  (remove nil (mapcar (lambda (thing/bounds)
+                        (let* ((thing (car thing/bounds))
+                               (bounds (cdr thing/bounds))
+                               (beg (car bounds))
+                               (end (cdr bounds)))
+                          (save-excursion
+                            (if (= beg (point-min))
+                                (goto-char (1+ end))
+                              (goto-char (1- beg)))
+                            (let ((bounds (things-base-bounds thing)))
+                              (when bounds
+                                (things--adjusted-bounds (cons thing bounds)))))))
+                      things/bounds)))
+
+(defun things--all-expanded-bounds (things current-bounds)
   "Get all bounds of THINGS that encompass CURRENT-BOUNDS.
 Return a list of conses of the form (thing . bounds) or nil if unsuccesful."
   ;; if inside a nested list, for example, this function should not return the
-  ;; same bounds as CURRENT-BOUNDS, so bounds are checked just before and after
-  ;; CURRENT-BOUNDS (positions where `bounds-of-thing-at-point' cannot return
-  ;; the same bounds assuming the thing is correctly implemented); the case
-  ;; where CURRENT-BOUNDS starts at the buffer beginning or ends at the buffer
-  ;; end (making it impossible to move before or after CURRENT-BOUNDS) is
-  ;; handled by `things--bounds-inside-p'
-  (let* ((before-things/bounds (save-excursion
-                                 (goto-char (1- (car current-bounds)))
-                                 (things--bounds things)))
-         (after-things/bounds (save-excursion
-                                (goto-char (cdr current-bounds))
-                                (things--bounds things)))
-         (all-things/bounds (cl-union before-things/bounds after-things/bounds
+  ;; same bounds as CURRENT-BOUNDS, so bounds are checked just before or after
+  ;; the base bounds for all things; checking just before/ctfer CURRENT-BOUNDS
+  ;; is not sufficient because the current bounds could be for an inner thing
+  (let* ((things/bounds (things--all-bounds things))
+         (base-things/bounds (things--all-base-bounds things))
+         (outer-things/bounds (things--all-outer-bounds base-things/bounds))
+         (all-things/bounds (cl-union things/bounds outer-things/bounds
                                       :test #'equal))
-         (encompassing-things/bounds (cl-remove-if (apply-partially
-                                                    #'things--bounds-inside-p
-                                                    current-bounds)
-                                                   all-things/bounds
-                                                   :key #'cdr)))
+         (encompassing-things/bounds (cl-remove-if-not
+                                      (apply-partially #'things--bounds-inside-p
+                                                       current-bounds)
+                                      all-things/bounds
+                                      :key #'cdr)))
     encompassing-things/bounds))
 
 (defun things-bounds (things &optional current-bounds)
@@ -580,8 +602,8 @@ return nil."
   ;; same bounds for the same point
   (setq things (things--make-things-list things))
   (let* ((all-bounds (if current-bounds
-                         (things--expanded-bounds things current-bounds)
-                       (things--bounds things))))
+                         (things--all-expanded-bounds things current-bounds)
+                       (things--all-bounds things))))
     (when all-bounds
       (let* ((sorted-bounds (cl-sort all-bounds
                                      ;; favor the smallest bounds
