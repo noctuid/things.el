@@ -1352,4 +1352,5 @@ With a negative count, go to the previous valid beginning of the pair."
   (put name 'things-overlay-position #'point)
   name)
 
+(provide 'things)
 ;;; things.el ends here
