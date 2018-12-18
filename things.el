@@ -801,6 +801,13 @@ override the default prompt. Return nil if the user aborts."
       (setq string (concat (nreverse string))))
     (lambda (&rest _) (looking-at (regexp-quote string)))))
 
+(defun things--valid-overlay-position-p (overlay-position bound-beg bound-end)
+  "Return whether OVERLAY-POSITION is visible and within the given bounds.
+BEG-BOUND is inclusive, and END-BOUND is exclusive."
+  (and (<= bound-beg overlay-position)
+       (< overlay-position bound-end)
+       (not (get-char-property overlay-position 'invisible))))
+
 ;; NOTE these are not necessary as avy is loaded at compile time (because
 ;; avy-dowindows is a macro), but they silence flycheck
 (declare-function avy-dowindows "avy")
@@ -815,49 +822,50 @@ arguments are passed to the PREDICATE."
   (setq things (things--make-things-list things))
   (let (thing-positions)
     (avy-dowindows current-prefix-arg
-      (save-excursion
-        (dolist (visible-region (avy--find-visible-regions
-                                 (if bound-function
-                                     (funcall bound-function t)
-                                   (point-min))
-                                 (if bound-function
-                                     (funcall bound-function)
-                                   (point-max))))
-          (goto-char (car visible-region))
-          (let ((current-window (get-buffer-window))
-                thing/pos
-                overlay-pos
-                region-thing-positions)
-            ;; add a text object at the beginning of the visible region
-            ;; as the eol of an invisible line can be visible in org buffers,
-            ;; don't do this if the point is at the eol
-            (when (and (not (looking-at (rx eol)))
-                       (setq thing/pos (things-bounds things))
-                       (setq overlay-pos
-                             (things--overlay-position (car thing/pos)))
-                       ;; overlay position must be visible
-                       (< (car visible-region)
-                          overlay-pos
-                          (cdr visible-region))
-                       (things--check-predicate (car thing/pos) predicate))
-              (push overlay-pos region-thing-positions))
-            (while (and (setq thing/pos
-                              (things-seek-forward things 1
-                                                   (lambda ()
-                                                     (cdr visible-region))))
-                        (setq overlay-pos
-                              (things--overlay-position (car thing/pos)))
-                        ;; overlay position must be visible
-                        (< (car visible-region)
-                           overlay-pos
-                           (cdr visible-region))
-                        (things--check-predicate (car thing/pos) predicate))
-              (push overlay-pos region-thing-positions))
-            (setq thing-positions
-                  (append thing-positions
-                          (mapcar (lambda (x) (cons x current-window))
-                                  (sort (delete-dups region-thing-positions)
-                                        #'<))))))))
+      (let ((bound-beg (if bound-function
+                           (funcall bound-function t)
+                         (point-min)))
+            (bound-end (if bound-function
+                           (funcall bound-function)
+                         (point-max))))
+        (save-excursion
+          (dolist (visible-region (avy--find-visible-regions bound-beg
+                                                             bound-end))
+            (goto-char (car visible-region))
+            (let ((current-window (get-buffer-window))
+                  thing/pos
+                  overlay-pos
+                  region-thing-positions)
+              ;; add a text object at the beginning of the visible region
+              ;; as the eol of an invisible line can be visible in org buffers,
+              ;; don't do this if the point is at the eol
+              (when (and (not (looking-at (rx eol)))
+                         (setq thing/pos (things-bounds things))
+                         (setq overlay-pos
+                               (things--overlay-position (car thing/pos)))
+                         ;; overlay-pos could be in a different visible region
+                         ;; from the current one
+                         (things--valid-overlay-position-p overlay-pos
+                                                           bound-beg
+                                                           bound-end)
+                         (things--check-predicate (car thing/pos) predicate))
+                (push overlay-pos region-thing-positions))
+              (while (and (setq thing/pos
+                                (things-seek-forward things 1
+                                                     (lambda ()
+                                                       (cdr visible-region))))
+                          (setq overlay-pos
+                                (things--overlay-position (car thing/pos)))
+                          (things--valid-overlay-position-p overlay-pos
+                                                            bound-beg
+                                                            bound-end)
+                          (things--check-predicate (car thing/pos) predicate))
+                (push overlay-pos region-thing-positions))
+              (setq thing-positions
+                    (append thing-positions
+                            (mapcar (lambda (x) (cons x current-window))
+                                    (sort (delete-dups region-thing-positions)
+                                          #'<)))))))))
     thing-positions))
 
 (defvar avy-style)
