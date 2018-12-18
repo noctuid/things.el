@@ -215,7 +215,7 @@ string, it will be excluded. All keys will be bound to DEF."
   (let ((full-name (intern (format "%s%s-%s" prefix adjustment name)))
         (docstring (format "Select %s %s." adjustment things))
         (adjusted-things (if (listp things)
-                             (mapcar (lambda (thing) (list adjustment thing))
+                             (mapcar (lambda (thing) (cons adjustment thing))
                                      things)
                            (cons adjustment things))))
     `(things-evil--define-text-object ,full-name
@@ -234,7 +234,7 @@ string, it will be excluded. All keys will be bound to DEF."
   (let ((full-name (intern (format "%s%s-next-%s" prefix adjustment name)))
         (docstring (format "Select next %s %s." adjustment things))
         (adjusted-things (if (listp things)
-                             (mapcar (lambda (thing) (list adjustment thing))
+                             (mapcar (lambda (thing) (cons adjustment thing))
                                      things)
                            (cons adjustment things))))
     `(things-evil--define-text-object ,full-name
@@ -250,7 +250,7 @@ string, it will be excluded. All keys will be bound to DEF."
   (let ((full-name (intern (format "%s%s-previous-%s" prefix adjustment name)))
         (docstring (format "Select previous %s %s." adjustment things))
         (adjusted-things (if (listp things)
-                             (mapcar (lambda (thing) (list adjustment thing))
+                             (mapcar (lambda (thing) (cons adjustment thing))
                                      things)
                            (cons adjustment things))))
     `(things-evil--define-text-object ,full-name
@@ -268,7 +268,7 @@ string, it will be excluded. All keys will be bound to DEF."
   (let ((full-name (intern (format "%s%s-remote-%s" prefix adjustment name)))
         (docstring (format "Select %s %s remotely with avy." adjustment things))
         (adjusted-things (if (listp things)
-                             (mapcar (lambda (thing) (list adjustment thing))
+                             (mapcar (lambda (thing) (cons adjustment thing))
                                      things)
                            (cons adjustment things))))
     `(things-evil--define-text-object ,full-name
