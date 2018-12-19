@@ -121,7 +121,15 @@ to move at least once, return the new position. Otherwise return nil."
   (let ((orig-pos (point)))
     (forward-thing thing count)
     (unless (= (point) orig-pos)
-      (let ((bounds (things-base-bounds thing)))
+      (let ((bounds
+             (save-excursion
+               ;; may have moved to a point in between two things, so move
+               ;; backwards one character
+               ;; TODO ensure this is sufficient or repurpose
+               ;; `things--after-seek-bounds' to be usable here
+               (unless (= (point) (point-min))
+                 (backward-char))
+               (things-base-bounds thing))))
         (if (and bounds
                  (= (point) (if (cl-plusp count)
                                 (cdr bounds)
