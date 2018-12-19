@@ -1227,11 +1227,11 @@ predicate could return nil if the point is preceded by an escape character."
 
 ;; ** Pairs
 (defmacro things--with-adjusted-syntax-table (open close &rest body)
-  "With OPEN and CLOSE set to parens in the current syntax table, run BODY."
+  "With OPEN and CLOSE set to parens in an empty syntax table, run BODY."
   (declare (indent 2))
   ;; won't be necessary without "abuse" , but use once-only for consistency
   (mmt-once-only (open close)
-    `(with-syntax-table (copy-syntax-table (syntax-table))
+    `(with-syntax-table (make-syntax-table (make-char-table 'things-pair-table))
        (modify-syntax-entry (string-to-char ,open) (format "(%s" ,close))
        (modify-syntax-entry (string-to-char ,close) (format ")%s" ,open))
        ,@body)))
