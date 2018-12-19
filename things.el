@@ -1195,6 +1195,7 @@ to. When SKIP-PAST-POINT is non-nil, move past an occurence of REGEXP that
 begins at the point before searching. Call PREDICATE (if specified) at each
 match to confirm that the point is at a valid occurrence. For example, the
 predicate could return nil if the point is preceded by an escape character."
+  (setq regexp (regexp-quote regexp))
   (save-match-data
     (let ((start-pos (point))
           successp)
@@ -1227,20 +1228,23 @@ predicate could return nil if the point is preceded by an escape character."
 
 ;; ** Pairs
 (defmacro things--with-adjusted-syntax-table (open close &rest body)
-  "With OPEN and CLOSE set to parens in an empty syntax table, run BODY."
+  "With OPEN and CLOSE set to parens in an empty syntax table, run BODY.
+Also set `forward-sexp-function' to nil while running BODY."
   (declare (indent 2))
   ;; won't be necessary without "abuse" , but use once-only for consistency
   (mmt-once-only (open close)
-    `(with-syntax-table (make-syntax-table (make-char-table 'things-pair-table))
-       (modify-syntax-entry (string-to-char ,open) (format "(%s" ,close))
-       (modify-syntax-entry (string-to-char ,close) (format ")%s" ,open))
-       ,@body)))
+    `(let (forward-sexp-function)
+       (with-syntax-table (make-syntax-table
+                           (make-char-table 'things-pair-table))
+         (modify-syntax-entry (string-to-char ,open) (format "(%s" ,close))
+         (modify-syntax-entry (string-to-char ,close) (format ")%s" ,open))
+         ,@body))))
 
 (defun things--bounds-of-char-pair-at-point (open close)
   "Return the bounds of a pair at point bounded by OPEN and CLOSE."
   ;; NOTE this correctly handles edge situations like (foo (bar)|) 
   (things--with-adjusted-syntax-table open close
-    (thing-at-point-bounds-of-list-at-point)))
+    (ignore-errors (thing-at-point-bounds-of-list-at-point))))
 
 (defun things--forward-char-pair-begin (open close)
   "Go to the next valid beginning of an OPEN CLOSE pair."
