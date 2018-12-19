@@ -859,6 +859,9 @@ arguments are passed to the PREDICATE."
                            (funcall bound-function)
                          (point-max))))
         (save-excursion
+          ;; TODO when seeking goes to the thing end, this can exclude things
+          ;; that start before but end after the window end; need to check only
+          ;; the overlay position
           (dolist (visible-region (avy--find-visible-regions bound-beg
                                                              bound-end))
             (goto-char (car visible-region))
