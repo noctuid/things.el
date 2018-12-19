@@ -1212,6 +1212,23 @@ even if the point is at the very beginning of end of those bounds (inclusive)."
     (things--backward-string-begin (- count))))
 (put 'things-string 'forward-op #'things-forward-string)
 
+;; ** Line
+(put 'things-line 'forward-op #'forward-line)
+
+;; ** Function
+(defun things-forward-function (&optional count)
+  "Move to the next function end COUNT times.
+With a negative COUNT, move to the previous function beginning."
+  (unless count
+    (setq count 1))
+  (if (cl-plusp count)
+      (things-move-with-count count
+        (end-of-defun))
+    (things-move-with-count (- count)
+      (beginning-of-defun))))
+(put 'things-function 'forward-op #'things-forward-function)
+(put 'things-function 'things-no-extend t)
+
 ;; * Thing Type Definers
 ;; These make it easy to automatically implement all necessary functions for
 ;; types of things (e.g. things bounded by regexps).
