@@ -727,6 +727,28 @@ CURRENT-BOUNDS. Seeking is bounded by BOUND-FUNCTION which defaults to
 `things-bound'. If successful in finding a thing bounds, return a cons of the
 form (thing . bounds). Otherwise return nil."
   (or (things-growing-bounds things count current-bounds)
+      ;; it is possible for growing to fail but there to still be a thing just
+      ;; after the region, e.g. ~...|(foo); check here to prevent seeking past
+      ;; it; require that the end be after the current bounds, so that this
+      ;; doesn't pick up other bounds that were rejected in
+      ;; `things-growing-bounds'
+      (when current-bounds
+        (let* ((before-thing/bounds
+                (save-excursion
+                  (goto-char (car current-bounds))
+                  (things-bounds things)))
+               (after-thing/bounds
+                (save-excursion
+                  (goto-char (cdr current-bounds))
+                  (things-bounds things)))
+               (before-bounds (cdr before-thing/bounds))
+               (after-bounds (cdr after-thing/bounds)))
+          (cond ((and after-bounds
+                      (> (cdr after-bounds) (cdr current-bounds)))
+                 after-thing/bounds)
+                ((and before-bounds
+                      (< (car before-bounds) (car current-bounds)))
+                 before-thing/bounds))))
       (save-excursion
         (when (things-seek things 1 (or bound-function #'things-bound))
           ;; do not attempt to grow with a count after seeking (count
