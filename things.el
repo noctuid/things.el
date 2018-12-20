@@ -467,67 +467,133 @@ at least once, return the new position. Otherwise return nil."
   (things-forward-end thing (- count)))
 
 ;; * Bounds Adjustment
-(defun things--get-inner (thing/bounds)
+(defun things-compose (&rest fns)
+  "Return a function composed of FNS.
+FNS will be called right to left."
+  (let ((fn1 (car (last fns)))
+        (fns (butlast fns)))
+    (lambda (&rest args)
+      (cl-reduce #'funcall fns
+                 :from-end t
+                 :initial-value (apply fn1 args)))))
+
+(defun things-get-adjust-function (thing adjustment)
+  "Return the function associated with THING to perform ADJUSTMENT.
+If the thing does not have an adjustment function for the specified ADJUSTMENT,
+return the default adjustment function if there is one."
+  (let ((adjust-function
+         (or (get thing (intern (format "things-get-%s" adjustment)))
+             (intern (format "things--get-%s" adjustment)))))
+    (when (functionp adjust-function)
+      adjust-function)))
+
+(defun things-shrink-by-1 (thing/bounds)
   "Shrink the bounds in THING/BOUNDS by 1 character on each side."
+  (setq thing/bounds (cl-copy-list thing/bounds))
   (let ((bounds (cdr thing/bounds)))
     (cl-incf (car bounds))
     (cl-decf (cdr bounds))
     thing/bounds))
 
-(defun things--get-inside (thing/bounds)
-  "Shrink the bounds in THING/BOUNDS to exclude whitespace and then newlines."
-  (let ((bounds (cdr thing/bounds)))
-    (goto-char (car bounds))
-    (skip-chars-forward " \t")
-    (skip-chars-forward "\n")
-    (setf (car bounds) (point))
-    (goto-char (cdr bounds))
-    (skip-chars-backward " \t")
-    (skip-chars-backward "\n")
-    (setf (cdr bounds) (point))
-    thing/bounds))
+(defun things-shrink-by-space-then-newlines (thing/bounds)
+  "Shrink the bounds in THING/BOUNDS to exclude spaces/tabs and then newlines.
+Whitespace after newlines at the start of the bounds and whitespace before
+newlines at the end of the bounds will not be excluded."
+  (save-excursion
+    (setq thing/bounds (cl-copy-list thing/bounds))
+    (let ((bounds (cdr thing/bounds)))
+      (goto-char (car bounds))
+      (skip-chars-forward " \t")
+      (skip-chars-forward "\n")
+      (setf (car bounds) (point))
+      (goto-char (cdr bounds))
+      (skip-chars-backward " \t")
+      (skip-chars-backward "\n")
+      (setf (cdr bounds) (point))
+      thing/bounds)))
 
-(defun things--get-around (thing/bounds)
-  "Grow the bounds in THING/BOUNDS to include whitespace after or before it."
-  (let ((bounds (cdr thing/bounds)))
-    (goto-char (cdr bounds))
-    (skip-chars-forward " \t")
-    (cond ((= (point) (cdr bounds))
-           (goto-char (car bounds))
-           (skip-chars-backward " \t")
-           (setf (car bounds) (point)))
-          (t
-           (setf (cdr bounds) (point))))
-    thing/bounds))
+(defun things-shrink-by-regexp (thing/bounds left right)
+  "Shrink the bounds in THING/BOUNDS using the regexps LEFT and RIGHT.
+When LEFT matches the start of the bounds, set the bounds start to the end of
+the match. When RIGHT matches the end of the bounds (to or before beginning of
+the bounds), set the bounds end to the beginning of the match. If LEFT or RIGHT
+is nil, don't attempt to shrink on the corresponding side."
+  (save-excursion
+    (save-match-data
+      (setq thing/bounds (cl-copy-list thing/bounds))
+      (let ((bounds (cdr thing/bounds)))
+        (when left
+          (goto-char (car bounds))
+          (when (looking-at left)
+            (setf (car bounds) (match-end 0))))
+        (when right
+          (goto-char (cdr bounds))
+          ;; TODO doesn't work with +; e.g. won't work for python docstring
+          (when (looking-back right (car bounds))
+            (setf (cdr bounds) (match-beginning 0))))
+        thing/bounds))))
+
+(defun things-shrink-by-newlines (thing/bounds)
+  "Shrink the bounds in THING/BOUNDS by newlines on either side."
+  (things-shrink-by-regexp thing/bounds "\n" "\n"))
+
+(defun things-grow-by-space-one-side (thing/bounds)
+  "Grow the bounds in THING/BOUNDS to include whitespace after or before it.
+Whitespace after the bounds is prioritized."
+  (save-excursion
+    (setq thing/bounds (cl-copy-list thing/bounds))
+    (let ((bounds (cdr thing/bounds)))
+      (goto-char (cdr bounds))
+      (cond ((= (skip-chars-forward " \t") 0)
+             (goto-char (car bounds))
+             (skip-chars-backward " \t")
+             (setf (car bounds) (point)))
+            (t
+             (setf (cdr bounds) (point))))
+      thing/bounds)))
+
+(defun things--get-inside (thing/bounds)
+  "Shrink THING/BOUNDS using the \"inner\" adjustment and then by whitespace.
+If the thing has an inner adjustment, perform that first, and then shrink the
+bounds further to exclude spaces/tabs then newlines."
+  (let ((adjust-function (things-get-adjust-function
+                          (things--base-thing (car thing/bounds))
+                          'inner)))
+    (when adjust-function
+      (setq thing/bounds (funcall adjust-function thing/bounds))))
+  (things-shrink-by-space-then-newlines thing/bounds))
+
+(defalias 'things--get-a #'things-grow-by-space-one-side)
+
+(defalias 'things--get-around #'things-grow-by-space-one-side)
 
 (defun things--get-linewise (thing/bounds)
   "Grow the bounds in THING/BOUNDS to encompass only whole lines."
-  (let ((bounds (cdr thing/bounds)))
-    (goto-char (car bounds))
-    (setf (car bounds) (line-beginning-position))
-    (goto-char (cdr bounds))
-    (setf (cdr bounds) (line-end-position))
-    thing/bounds))
+  (save-excursion
+    (setq thing/bounds (cl-copy-list thing/bounds))
+    (let ((bounds (cdr thing/bounds)))
+      (goto-char (car bounds))
+      (setf (car bounds) (line-beginning-position))
+      (goto-char (cdr bounds))
+      (setf (cdr bounds) (line-end-position))
+      thing/bounds)))
 
 (defun things--adjusted-bounds (thing/bounds)
   "Adjust and return THING/BOUNDS.
-If the thing in THING/BOUNDS specifies an adjustment (e.g. \"(inner comment)\"),
-use the thing's corresponding adjustment function to alter the bounds in
-THING/BOUNDS. If the thing does not have a corresponding ADJUSTMENT function
-defined, fall back to the default one if it exists. If there is no specified
-adjustment or there is no available function for the specified adjustment, just
-return THING/BOUNDS."
-  (let ((thing (car thing/bounds)))
-    (if (things--adjusted-thing-p thing)
-        (let* ((adjustment (car thing))
-               (base-thing (cdr thing))
-               (adjust-function
-                (or (get (intern (format "things-get-%s" adjustment))
-                         base-thing)
-                    (intern (format "things--get-%s" adjustment)))))
-          (if (functionp adjust-function)
-              (funcall adjust-function thing/bounds)
-            thing/bounds))
+If the thing in THING/BOUNDS specifies an adjustment (e.g. \"(inner .
+comment)\"), use the thing's corresponding adjustment function to alter the
+bounds in THING/BOUNDS. If the thing does not have a corresponding ADJUSTMENT
+function defined, fall back to the default one if it exists. If there is no
+specified adjustment or there is no available function for the specified
+adjustment, just return THING/BOUNDS."
+  (let* ((thing (car thing/bounds))
+         (adjust-function
+          (when (things--adjusted-thing-p thing)
+            (let* ((adjustment (car thing))
+                   (base-thing (cdr thing)))
+              (things-get-adjust-function base-thing adjustment)))))
+    (if adjust-function
+        (funcall adjust-function thing/bounds)
       thing/bounds)))
 
 ;; * Bounds at Point
@@ -1151,6 +1217,14 @@ considered to be one \"aggregated\" comment. Block comments are not aggregated."
     (things--backward-aggregated-comment-begin (- count))))
 (put 'things-aggregated-comment 'forward-op #'things-forward-aggregated-comment)
 
+(defun things-get-inner-aggregated-comment (thing/bounds)
+  "Shrink THING/BOUNDS to exclude `comment-start-skip' and `comment-end-skip'."
+  (things-shrink-by-regexp thing/bounds comment-start-skip comment-end-skip))
+
+(put 'things-aggregated-comment 'things-get-inner
+     #'things-get-inner-aggregated-comment)
+(put 'things-aggregated-comment 'things-get-a #'identity)
+
 ;; ** String
 (defconst things-string-regexp (rx (1+ (or (syntax string-quote)
                                            (syntax string-delimiter))))
@@ -1212,8 +1286,20 @@ even if the point is at the very beginning of end of those bounds (inclusive)."
     (things--backward-string-begin (- count))))
 (put 'things-string 'forward-op #'things-forward-string)
 
+(defun things-get-inner-string (thing/bounds)
+  "Shrink THING/BOUNDS to exclude `things-string-regxep' on both sides."
+  (things-shrink-by-regexp thing/bounds
+                           things-string-regexp
+                           things-string-regexp))
+
+(put 'things-string 'things-get-inner #'things-get-inner-string)
+(put 'things-string 'things-get-a #'identity)
+
 ;; ** Line
 (put 'things-line 'forward-op #'forward-line)
+
+(put 'things-line 'things-get-inner #'things-shrink-by-newlines)
+(put 'things-line 'things-get-a #'identity)
 
 ;; ** Function
 (defun things-forward-function (&optional count)
@@ -1228,6 +1314,9 @@ With a negative COUNT, move to the previous function beginning."
       (beginning-of-defun))))
 (put 'things-function 'forward-op #'things-forward-function)
 (put 'things-function 'things-no-extend t)
+
+(put 'things-function 'things-get-inner #'things-shrink-by-newlines)
+(put 'things-function 'things-get-a #'identity)
 
 ;; * Thing Type Definers
 ;; These make it easy to automatically implement all necessary functions for
@@ -1404,6 +1493,10 @@ With a negative count, go to the previous valid beginning of the pair."
   (put name 'things-seeks-forward-begin t)
   (put name 'things-no-extend t)
   (put name 'things-overlay-position #'point)
+  (put name 'things-get-inner
+       (lambda (thing/bounds)
+         (things-shrink-by-regexp thing/bounds open close)))
+  (put name 'things-get-a #'identity)
   name)
 
 (provide 'things)
