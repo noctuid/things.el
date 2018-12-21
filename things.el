@@ -127,7 +127,8 @@ to move at least once, return the new position. Otherwise return nil."
                ;; backwards one character
                ;; TODO ensure this is sufficient or repurpose
                ;; `things--after-seek-bounds' to be usable here
-               (unless (= (point) (point-min))
+               (unless (or (cl-minusp count)
+                           (= (point) (point-min)))
                  (backward-char))
                (things-base-bounds thing))))
         (if (and bounds
