@@ -1500,5 +1500,54 @@ With a negative count, go to the previous valid beginning of the pair."
   (put name 'things-get-a #'identity)
   name)
 
+;; ** Separators
+;; (defun things--bounds-of-separator-at-point (separator)
+;;   (save-excursion
+;;     (let (beg end)
+;;       (when (looking-at separator)
+;;         (setq beg (point))
+;;         (goto-char (match-end 0)))
+;;       (setq end (when (re-search-forward separator nil t)
+;;                   (goto-char (match-beginning 0))))
+;;       (unless beg
+;;         (setq beg (re-search-backward separator nil t)))
+;;       (when (and beg end)
+;;         (cons beg end)))))
+
+(defun things--forward-separator (separator &optional count)
+  (unless count
+    (setq count 1))
+  ;; check if in already between separators
+  (unless (save-excursion
+            (if (cl-plusp count)
+                (or (looking-at separator)
+                    (re-search-backward separator nil t))
+              (re-search-forward separator nil t)))
+    (if (cl-plusp count)
+        (cl-incf count)
+      (cl-decf count)))
+  ;; note that `re-search-forward' will not move the point if there are less
+  ;; than COUNT matches
+  (cond ((cl-plusp count)
+         (when (looking-at separator)
+           (goto-char (match-end 0)))
+         (when (re-search-forward separator nil t count)
+           (goto-char (match-beginning 0))))
+        (t
+         (re-search-backward separator nil t (- count)))))
+
+(defun things-define-separator (name separator)
+  "Create a separator thing called NAME bounded by SEPARATOR."
+  (put name 'forward-op
+       (lambda (&optional count)
+         (things--forward-separator separator count)))
+  ;; (put name 'bounds-of-thing-at-point
+  ;;      (lambda ()
+  ;;        (things--bounds-of-separator-at-point separator)))
+  (put name 'things-get-inner
+       (lambda (thing/bounds)
+         (things-shrink-by-regexp thing/bounds separator nil)))
+  (put name 'things-get-a #'identity))
+
 (provide 'things)
 ;;; things.el ends here
