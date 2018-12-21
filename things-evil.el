@@ -158,6 +158,20 @@ objects. This function is meant to be added to `post-command-hook'."
       ;;   ((call-interactively to)))
       (call-interactively to))))
 
+;; * Existing Evil Thing Integration
+;; ** Word/WORD
+(put 'things-evil-word 'forward-op #'forward-evil-word)
+(put 'things-evil-WORD 'forward-op #'forward-evil-WORD)
+
+;; ** Symbol
+(put 'things-evil-symbol 'forward-op #'forward-evil-symbol)
+
+;; ** Sentence
+(put 'things-evil-sentence 'forward-op #'forward-evil-sentence)
+
+;; ** Paragraph
+(put 'things-evil-paragraph 'forward-op #'forward-evil-paragraph)
+
 ;; * Text Object Definition/Binding
 (defun things-evil-range (thing/bounds type)
   "Call `evil-range' with the bounds from THING/BOUNDS and TYPE."
