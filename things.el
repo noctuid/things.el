@@ -1329,12 +1329,14 @@ With a negative COUNT, move to the previous function beginning."
   "Return the match data of the next position matched by REGEXP.
 If BACKWARD is non-nil, search backward instead of forward. If MOVE is non-nil,
 move to the match instead of returning the match data. By default, move to the
-match end when searching forward and the match end when searching backward. MOVE
-can also be 'begin or 'end to explicitly choose which part of the match to move
-to. When SKIP-PAST-POINT is non-nil, move past an occurence of REGEXP that
-begins at the point before searching. Call PREDICATE (if specified) at each
-match to confirm that the point is at a valid occurrence. For example, the
-predicate could return nil if the point is preceded by an escape character."
+match end when searching forward and to the match beginning when searching
+backward. MOVE can also be 'begin or 'end to explicitly choose which part of the
+match to move to. When SKIP-PAST-POINT is non-nil, move past an occurence of
+REGEXP that begins at the point before searching. Call PREDICATE (if specified)
+at each match to confirm that the point is at a valid occurrence. For example,
+the predicate could return nil if the point is preceded by an escape character.
+The match data of the each occurence is available for use in PREDICATE (with
+`match-data', `match-end', etc.). If there are no valid matches, return nil."
   (setq regexp (regexp-quote regexp))
   (save-match-data
     (let ((start-pos (point))
@@ -1353,18 +1355,19 @@ predicate could return nil if the point is preceded by an escape character."
                   (when predicate
                     (not (funcall predicate))))
         (setq successp nil))
-      (if successp
-          (if move
-              (goto-char (cl-case move
-                           (begin (match-beginning 0))
-                           (end (match-end 0))
-                           (t (if backward
-                                  (match-beginning 0)
-                                (match-end 0)))))
-            (goto-char start-pos)
-            (match-data))
-        (goto-char start-pos)
-        nil))))
+      (cond (successp
+             (if move
+                 (goto-char (cl-case move
+                              (begin (match-beginning 0))
+                              (end (match-end 0))
+                              (t (if backward
+                                     (match-beginning 0)
+                                   (match-end 0)))))
+               (goto-char start-pos))
+             (match-data))
+            (t
+             (goto-char start-pos)
+             nil)))))
 
 ;; ** Pairs
 (defmacro things--with-adjusted-syntax-table (open close &rest body)
