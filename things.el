@@ -32,6 +32,11 @@
 ;; - bounds/region extension/expansion
 ;; - thing bounds adjustment (e.g. to get the bounds of an "inner list")
 
+;; The goal is to provide a library that makes implementing things with this
+;; functionality as simple as possible. Furthermore, things implemented by this
+;; library should be usable not only by evil but by any package (there is no
+;; evil dependency).
+
 ;; For more information see the README in the repository.
 
 ;;; Code:
@@ -61,6 +66,7 @@
          (unless (= ,final-pos ,orig-pos)
            ,final-pos)))))
 
+;; TODO make part of API
 (defun things--base-thing (thing)
   "Return the base thing in THING.
 If THING is in the form (adjustment . thing), discard the adjustment and just
@@ -103,6 +109,14 @@ item."
            (not (things--adjusted-thing-p things)))
       things
     (list things)))
+
+;; TODO this isn't sufficient if not using symbol plist
+(defun things-clone-thing (new-thing old-thing)
+  "Create NEW-THING as a copy of OLD-THING.
+This just sets the symbol plist of NEW-THING to the symbol plist of OLD-THING.
+This is similar to `defalias', but the intent is that NEW-THING be further
+modified after calling this."
+  (setplist new-thing (symbol-plist old-thing)))
 
 ;; * Default Thingatpt Compatability Layer
 (defun things-base-bounds (thing)
@@ -635,6 +649,8 @@ Return a list of conses of the form (thing . bounds) or nil if unsuccessful."
                             (cons thing bounds))))
                       things)))
 
+;; TODO (progn (foo)(ba|r)(baz))
+;; how to get progn bounds? keep skipping forward or backward if start/end the same?
 (defun things--all-outer-bounds (things/bounds)
   "Get the bounds for all things in THINGS/BOUNDS outside the current bounds.
 For every existing thing/bounds, try the corresponding bound function just
@@ -782,6 +798,8 @@ can be grown at least once, growing is considered successful."
     (or extended-thing/bounds expanded-thing/bounds first-thing/bounds)))
 
 ;; * Bounds with Seeking
+;; TODO bounding seeking to window bounds is an issue;
+;; should be unbdounded by default
 ;; TODO add arg to only seek in one direction
 (defun things-seeking-bounds (things &optional current-bounds bound-function)
   "Get the smallest bounds of a thing in THINGS.
@@ -1015,22 +1033,30 @@ form (thing . bounds). Otherwise return nil."
 ;; TODO this should be part of core Emacs or at least a separate library
 ;; TODO escape syntax character
 ;; https://github.com/dgutov/highlight-escape-sequences/blob/master/highlight-escape-sequences.el
-(defvar things-escape-alist)
-;; TODO ?( is a character but `up-list', syntax higlighting, etc. don't
-;; consider ? alone an escape character (needs to be ?\<char>)
-'((t . "\\\\"))
+(defvar things-escape-alist
+  ;; TODO ?( is a character but `up-list', syntax higlighting, etc. don't
+  ;; consider ? alone an escape character (needs to be ?\<char>)
+  ;; TODO how to handle ?\\
+  '((t . "\\\\")))
 
 ;; TODO use buffer-local variable instead?
 ;; TODO see `sp-char-is-escaped-t'
+
+;; TODO is using syntax table preferable
+;; https://www.gnu.org/software/emacs/manual/html_node/elisp/Syntax-Class-Table.html#Syntax-Class-Table
 (defun things--at-escaped-character-p ()
   "Check if the character after the point is escaped."
   (let ((escape-regexp
          (or (cdr (assq major-mode things-escape-alist))
              (cdr (assq t things-escape-alist)))))
     ;; TODO handle case like \\\\\\); unlikely but possible
+    ;; for example, while not even count do this
+    ;; (string= (string (char-syntax (char-before (point))))
+    ;;          "\\")
     (save-match-data
       (things--looking-back escape-regexp))))
 
+;; TODO look at `evil-motion-loop'
 (defmacro things-move-with-count (count &rest body)
   "While COUNT is positive, run BODY.
 If the point does not change after an iteration of body, stop there and leave
@@ -1236,10 +1262,13 @@ considered to be one \"aggregated\" comment. Block comments are not aggregated."
                                            (syntax string-delimiter))))
   "Regexp to potentially match a string start or end character.")
 
+;; TODO save-match-data? (used by pair definer but doesn't seem to cause an
+;; issue with next-open etc.)
 (defun things--bounds-string ()
   "Return the bounds of the string at the point or nil.
 This is a slightly modified `lispy--bounds-string'. It will return the bounds
 even if the point is at the very beginning of end of those bounds (inclusive)."
+  ;; TODO does this check just slow things down? remove probably
   (unless (things--in-comment-p)
     (let ((beg (or (nth 8 (syntax-ppss))
                    ;; (and (looking-at things-string-regexp)
