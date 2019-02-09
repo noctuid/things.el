@@ -1330,7 +1330,7 @@ With a negative COUNT, move to the previous function beginning."
 
 ;; ** Helpers
 (cl-defun things-next-regexp (regexp &key backward move skip-past-point
-                                     predicate)
+                                     predicate bound)
   "Return the match data of the next position matched by REGEXP.
 If BACKWARD is non-nil, search backward instead of forward. If MOVE is non-nil,
 move to the match instead of returning the match data. By default, move to the
@@ -1341,7 +1341,10 @@ REGEXP that begins at the point before searching. Call PREDICATE (if specified)
 at each match to confirm that the point is at a valid occurrence. For example,
 the predicate could return nil if the point is preceded by an escape character.
 The match data of the each occurence is available for use in PREDICATE (with
-`match-data', `match-end', etc.). If there are no valid matches, return nil."
+`match-data', `match-end', etc.). It is also fine for the PREDICATE to move the
+point to move the point (e.g. to skip past an invalid region). If there are no
+valid matches, return nil. BOUND, if specified, is a buffer position to bound
+the search."
   (setq regexp (regexp-quote regexp))
   (save-match-data
     (let ((start-pos (point))
@@ -1354,8 +1357,8 @@ The match data of the each occurence is available for use in PREDICATE (with
                        (match-beginning 0)
                      (match-end 0))))
       (while (and (if backward
-                      (re-search-backward regexp nil t)
-                    (re-search-forward regexp nil t))
+                      (re-search-backward regexp bound t)
+                    (re-search-forward regexp bound t))
                   (setq successp t)
                   (when predicate
                     (not (funcall predicate))))
