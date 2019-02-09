@@ -1244,9 +1244,10 @@ Line comments that start at the same column and have no code in between them are
 considered to be one \"aggregated\" comment. Block comments are not aggregated."
   (unless count
     (setq count 1))
-  (if (cl-plusp count)
-      (things--forward-aggregated-comment-end count)
-    (things--backward-aggregated-comment-begin (- count))))
+  (save-match-data
+    (if (cl-plusp count)
+        (things--forward-aggregated-comment-end count)
+      (things--backward-aggregated-comment-begin (- count)))))
 (put 'things-aggregated-comment 'forward-op #'things-forward-aggregated-comment)
 
 (defun things-get-inner-aggregated-comment (thing/bounds)
