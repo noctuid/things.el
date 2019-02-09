@@ -609,9 +609,13 @@ adjustment, just return THING/BOUNDS."
   (- (cdr bounds) (car bounds)))
 
 (defun things--bounds-< (bounds1 bounds2)
-  "Return whether the size of BOUNDS1 is less than BOUNDS2."
-  (< (things--bounds-size bounds1)
-     (things--bounds-size bounds2)))
+  "Return whether the size of BOUNDS1 is less than BOUNDS2.
+If they are equal, return whether BOUNDS1 starts sooner."
+  (let ((size1 (things--bounds-size bounds1))
+        (size2 (things--bounds-size bounds2)))
+    (if (= size1 size2)
+        (< (car bounds1) (car bounds2))
+      (< size1 size2))))
 
 (defun things--all-bounds (things)
   "Get the bounds of all the THINGS at the point.
@@ -669,6 +673,21 @@ Return a list of conses of the form (thing . bounds) or nil if unsuccesful."
                                       :key #'cdr)))
     encompassing-things/bounds))
 
+(defun things--smallest-bounds (all-things/bounds)
+  "Return the smallest thing/bounds in ALL-THINGS/BOUNDS.
+If there are multiple smallest bounds of the same size, return the one that
+starts first."
+  (car (cl-sort all-things/bounds #'things--bounds-< :key #'cdr)))
+
+(defun things--largest-bounds (all-things/bounds)
+  "Return the largest thing/bounds in ALL-THINGS/BOUNDS.
+If there are multiple largest bounds of the same size, return the one that
+starts first."
+  (car (cl-sort all-things/bounds
+                (lambda (&rest args)
+                  (not (apply #'things--bounds-< args)))
+                :key #'cdr)))
+
 (defun things-bounds (things &optional current-bounds)
   "Get the smallest bounds of a thing at point in THINGS.
 If CURRENT-BOUNDS is non-nil, only consider bounds that encompass the current
@@ -680,21 +699,7 @@ return nil."
   (let* ((all-bounds (if current-bounds
                          (things--all-expanded-bounds things current-bounds)
                        (things--all-bounds things))))
-    (when all-bounds
-      (let* ((sorted-bounds (cl-sort all-bounds
-                                     ;; favor the smallest bounds
-                                     #'things--bounds-< :key #'cdr))
-             (smallest-size (things--bounds-size (cdar sorted-bounds)))
-             (smallest-bounds
-              ;; take while same size
-              (cl-loop for thing-bounds in sorted-bounds
-                       while (= (things--bounds-size (cdr thing-bounds))
-                                smallest-size)
-                       collect thing-bounds)))
-        (if (<= (length smallest-bounds) 1)
-            (car smallest-bounds)
-          ;; if multiple bounds of same size, favor the one that starts first
-          (car (cl-sort smallest-bounds #'< :key #'cadr)))))))
+    (things--smallest-bounds all-bounds)))
 
 ;; * Bounds Growing
 (defun things-expanded-bounds (things current-bounds count)
