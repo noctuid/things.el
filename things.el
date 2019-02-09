@@ -519,11 +519,11 @@ newlines at the end of the bounds will not be excluded."
     (let ((bounds (cdr thing/bounds)))
       (goto-char (car bounds))
       (skip-chars-forward " \t")
-      (skip-chars-forward "\n")
+      (skip-chars-forward "\n\r")
       (setf (car bounds) (point))
       (goto-char (cdr bounds))
       (skip-chars-backward " \t")
-      (skip-chars-backward "\n")
+      (skip-chars-backward "\n\r")
       (setf (cdr bounds) (point))
       thing/bounds)))
 
