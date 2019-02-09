@@ -1,0 +1,39 @@
+* Disclaimer
+=things.el= is not ready for usage as a library by other packages; the public API is still evolving as I implement more things. I will likely start using it in my own packages (e.g. lispyville, sentence-navigation, etc.) before a stable =1.0= release. Before this release, there will likely be many breaking changes, and the package may not have complete automated tests. While =things.el= is useable for demonstration purposes at this point, I am still very much expirementing with the best way to acheive the goals listed here.
+
+That said, you can start using the specification provided here to help you implement things even without =things.el= today. The instructions here can help you consider important edge cases and easily switch to using =things.el= in the future.
+
+* =things.el= Summary
+The goal of this package is to provide a library that makes implementing things/text objects as simple as possible (and with no dependence on =evil=). It is built on top of =thingatpt=. The idea is that Emacs' builtin =thingatpt= is a great way to implement things/text objects but could be improved by providing a larger, precise specification for how to implement things that considers additional functionality such as seeking as well as edges cases (especially with regards to nestable things).
+
+With this package, it should be much easier and in some cases trivial to define new things/text objects. The idea is that you implement a minimal set of required functions to describe how your thing should behave, and then =things.el= does the rest of the work such as handling counts, seeking, remote selection with =avy=, etc.
+
+=things.el= also tries to group together similar types of things (such as things delimited by pairs of start and end characters) and provide definers for them that implement all required functions for you without any work or knowledge of the specification required.
+
+The hope is to provide support for enough things and types of things out of the box, so that mass adoption is not first required for the library to be useful.
+
+* Thing Functionality
+This library allows creating things with extra functionality including:
+- composite things (e.g. a paren, bracket, or curly brace thing)
+- nestable things
+- seeking when no thing at point (or with count)
+- getting next/previous thing (with optional count)
+- getting thing bounds with overlays (optional dependency on avy)
+- bounds/region extension/expansion
+- arbitrary bounds adjustment (e.g. to get the bounds of an "inner list")
+- (forward|backward)-<optional adjustment>-<thing>-(begin|end) motion generation
+
+Motion function generation and region expansion are incidental features. I do not personally use region expansion and recommend using precise things/text objects instead. With remote text objects, you can use avy to precisely select a thing without having to calculate a count. As for motions, the main focus is on text objects, but since the functions required to implement text objects can also be used to implement motions, it makes sense to provide support for creating both text objects and motions.
+
+* Comparison to Evil
+My prior package =targets.el= is a mess in large part due to being built on top of =evil=. Evil builds upon =thingatpt= as well, but not in a way that is very suitable for use as a library for implementing text objects. For this reason, I decided to rewrite targets using =thingatpt= only.
+
+For example, evil implements seeking and growing in non-reusable and incompatible ways for different types of text objects (e.g. see ~evil-select-an-object~, ~evil-select-block~, ~evil-select-quote-thing~, etc.). Evil also falls back to seeking inside its text object selection functions, meaning that extra checks are required to determine whether there is a valid text object at the point or if evil had to search to find one. =things.el= instead segragates and composes different functionality including seeking, making it more suitable for generic usage as a library. Trying to support composite text objects was also a challenge in =targets.el=. =targets.el= has separate functions for defining composite text objects, and they don't behave quite correctly in many circumstances. =things.el= has first-class support for handling composite things and handles them even in its lower level functions, making it much easier to support sane behavior.
+
+The other primary problem I had trying to build =targets.el= on top of evil is the lack of a consistent interface (i.e. no single select function). =targets.el= has 4 different types of things: =pair=, =separator=, =quote=, and =object=. This is because I had to wrap 4+ different ~evil-select-...~ functions. Really, I just wanted to use =object=. =things.el= has a single "select" function (~things-bounds~) that works for anything. Again, the concept of "pairs" and "separators" is instead supported at a separate, higher level.
+
+Finally, text objects are useful regardless of the keybinding system and should not require evil.
+
+* =things-evil.el=
+** Summary
+=things-evil.el= is a package built on top of =things.el= for integration with evil. It is essentially the new =targets.el= and will likely be moved to a separate repo once both packages have stabilized more.
