@@ -1057,11 +1057,16 @@ form (thing . bounds). Otherwise return nil."
       (things--looking-back escape-regexp))))
 
 ;; TODO look at `evil-motion-loop'
+;; TODO at some point may need to know the number of succesful iterations, so
+;; consider returning that instead of the point (could, for example, build
+;; another function on top of that fails if not able to move exactly count
+;; times) 
 (defmacro things-move-with-count (count &rest body)
   "While COUNT is positive, run BODY.
 If the point does not change after an iteration of body, stop there and leave
 the point as-is. This means that the BODY should move the point on success and
-keep the point as-is on failure."
+keep the point as-is on failure. If the point moves at least once, return the
+new point. Otherwise return nil."
   (declare (indent 1) (debug t))
   (let ((start-pos (cl-gensym)))
     `(things-return-point-if-changed
@@ -1572,30 +1577,50 @@ With a negative count, go to the previous valid beginning of the pair."
 ;;       (when (and beg end)
 ;;         (cons beg end)))))
 
-(defun things--forward-separator (separator &optional count)
+(defun things--forward-separator (separator &optional count
+                                            include-buffer-bounds)
+  "Move to the end of the next SEPARATOR up to COUNT times.
+With a negative COUNT, move to the previous SEPARATOR up to COUNT times. By
+default, a SEPARATOR can only be a closing SEPARATOR if there is one prior in
+the buffer. For example, with a buffer \"|foo, bar, baz\",
+calling (things--forward-separator \",\" 1) would result in \"foo, bar|, baz\".
+Similarly, with \"foo, bar, baz|\", (things--forward-separator \",\" -1) would
+result in \"foo|, bar, baz\". To allow the buffer beginning and end to be the
+start and end of a separator thing respectively, INCLUDE-BUFFER-BOUNDS can be
+specified as non-nil. If able to move to a valid separator at least once, return
+the point. Otherwise return nil."
   (unless count
     (setq count 1))
-  ;; check if in already between separators
-  (unless (save-excursion
-            (if (cl-plusp count)
-                (or (looking-at separator)
-                    (re-search-backward separator nil t))
-              (re-search-forward separator nil t)))
-    (if (cl-plusp count)
-        (cl-incf count)
-      (cl-decf count)))
-  ;; note that `re-search-forward' will not move the point if there are less
-  ;; than COUNT matches
+  (unless include-buffer-bounds
+    ;; check if in already between separators
+    (unless (save-excursion
+              (if (cl-plusp count)
+                  (or (looking-at separator)
+                      (re-search-backward separator nil t))
+                (re-search-forward separator nil t)))
+      (if (cl-plusp count)
+          (cl-incf count)
+        (cl-decf count))))
   (cond ((cl-plusp count)
          (when (looking-at separator)
            (goto-char (match-end 0)))
-         (when (re-search-forward separator nil t count)
+         (when include-buffer-bounds
+           (setq separator (rx-to-string `(or buffer-end ,separator))))
+         (when (things-move-with-count count
+                 ;; use `things-move-with-count' since `re-search-forward' will
+                 ;; not move the point if there are less than COUNT matches
+                 (re-search-forward separator nil t))
            (goto-char (match-beginning 0))))
         (t
-         (re-search-backward separator nil t (- count)))))
+         (when include-buffer-bounds
+           (setq separator (rx-to-string `(or buffer-start ,separator))))
+         (things-move-with-count (- count)
+           (re-search-backward separator nil t)))))
 
-(defun things-define-separator (name separator)
-  "Create a separator thing called NAME bounded by SEPARATOR."
+(defun things-define-separator (name separator &optional include-buffer-bounds)
+  "Create a separator thing called NAME bounded by SEPARATOR.
+When INCLUDE-BUFFER-BOUNDS is non-nil, a separator thing can start at the buffer
+beginning or end at the buffer end."
   (put name 'forward-op
        (lambda (&optional count)
          (things--forward-separator separator count)))
