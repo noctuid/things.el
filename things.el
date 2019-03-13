@@ -1421,11 +1421,28 @@ Also set `forward-sexp-function' to nil while running BODY."
          (modify-syntax-entry (string-to-char ,close) (format ")%s" ,open))
          ,@body))))
 
+;; https://github.com/emacs-mirror/emacs/commit/76e297c15f6312a83599aab216be0396e9aac5c5#diff-8636894786ef40e6db7d629928e663ee
+;; don't want enclosing list: https://github.com/emacs-mirror/emacs/commit/1e3b3fa6159db837fca2f2d564e51b01048a906f#diff-8636894786ef40e6db7d629928e663ee
+(defun things--old-thing-at-point-bounds-of-list-at-point ()
+  "Return the bounds of the list at point.
+\[Internal function used by `bounds-of-thing-at-point'.]"
+  (save-excursion
+    (let* ((st (parse-partial-sexp (point-min) (point)))
+           (beg (or (and (eq 4 (car (syntax-after (point))))
+                         (not (nth 8 st))
+                         (point))
+                    (nth 1 st))))
+      (when beg
+        (goto-char beg)
+        (forward-sexp)
+        (cons beg (point))))))
+
 (defun things--bounds-of-char-pair-at-point (open close)
   "Return the bounds of a pair at point bounded by OPEN and CLOSE."
-  ;; NOTE this correctly handles edge situations like (foo (bar)|) 
+  ;; NOTE this correctly handles edge situations like (foo (bar)|) for things'
+  ;; spec (should return the bounds of foo list)
   (things--with-adjusted-syntax-table open close
-    (ignore-errors (thing-at-point-bounds-of-list-at-point))))
+    (ignore-errors (things--old-thing-at-point-bounds-of-list-at-point))))
 
 (defun things--forward-char-pair-begin (open close)
   "Go to the next valid beginning of an OPEN CLOSE pair."
