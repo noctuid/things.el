@@ -253,7 +253,7 @@ string, it will be excluded. All keys will be bound to DEF."
                            (cons adjustment things))))
     `(things-evil--define-text-object ,full-name
        ,docstring
-       (targets--reset-after)
+       (things-evil--reset-after)
        (things-evil-range
         (things-next-bounds ',adjusted-things count)
         type))))
@@ -269,7 +269,7 @@ string, it will be excluded. All keys will be bound to DEF."
                            (cons adjustment things))))
     `(things-evil--define-text-object ,full-name
        ,docstring
-       (targets--reset-after)
+       (things-evil--reset-after)
        (things-evil-range
         (things-previous-bounds ',adjusted-things count)
         type))))
@@ -287,7 +287,7 @@ string, it will be excluded. All keys will be bound to DEF."
                            (cons adjustment things))))
     `(things-evil--define-text-object ,full-name
        ,docstring
-       (targets--reset-after)
+       (things-evil--reset-after)
        ;; set repeat keys
        (when (evil-repeat-recording-p)
          (setq
