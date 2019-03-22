@@ -54,6 +54,44 @@
   :prefix "things-")
 
 ;; * General Helpers
+(defun things--altered-thing-p (thing)
+  "Return whether THING is an altered thing.
+Altered things are things with adjustments and/or contraints (e.g. '(paren
+:adjustment inner)). Return nil if THING is a list of things or a thing without
+any alterations. Specifically, check if THING is a list containing any
+keywords."
+  (and (listp thing)
+       (cl-some #'keywordp thing)))
+
+;; TODO make part of API
+(defun things--base-thing (thing)
+  "Return the base thing in THING.
+If THING is an altered thing, discard the alterations and just return the
+thing (e.g. '(paren :adjustment inner ...) -> 'paren)."
+  (if (things--altered-thing-p thing)
+      (car thing)
+    thing))
+
+(defun things--alteration (thing alteration)
+  "Return THING's value for ALTERATION if it exists."
+  (when (things--altered-thing-p thing)
+    (plist-get (cdr thing) alteration)))
+
+(defun things--get (thing prop)
+  "Call `get' with the base thing in THING and PROP.
+See `things--base-thing' also."
+  (get (things--base-thing thing) prop))
+
+(defun things--make-things-list (things)
+  "Return THINGS as a list.
+If THINGS is already a list of things, return it as-is. If it is a single
+thing (with or without an adjustment), return a new list with it as the only
+item."
+  (if (and (listp things)
+           (not (things--altered-thing-p things)))
+      things
+    (list things)))
+
 ;; TODO better name?
 (defmacro things-return-point-if-changed (&rest body)
   "Run the forms BODY and return the `point' if it has changed."
@@ -65,20 +103,6 @@
        (let ((,final-pos (point)))
          (unless (= ,final-pos ,orig-pos)
            ,final-pos)))))
-
-;; TODO make part of API
-(defun things--base-thing (thing)
-  "Return the base thing in THING.
-If THING is in the form (adjustment . thing), discard the adjustment and just
-return the thing."
-  (if (things--adjusted-thing-p thing)
-      (cdr thing)
-    thing))
-
-(defun things--get (thing prop)
-  "Call `get' with the base thing in THING and PROP.
-See `things--base-thing' also."
-  (get (things--base-thing thing) prop))
 
 (defmacro things--run-op-or (thing op-sym count &rest body)
   "If THING has an OP-SYM property, run it with COUNT.
@@ -92,24 +116,6 @@ new position. Otherwise return nil."
              (funcall ,op ,count)
            ,@body)))))
 
-(defun things--adjusted-thing-p (thing)
-  "Return whether THING is an adjusted thing.
-Return nil if THING is a list of things or a thing without an adjustment.
-Specifically, check if THING is a cons cell of the form (adjustment . thing)."
-  (and (consp thing)
-       (cdr thing)
-       (not (listp (cdr thing)))))
-
-(defun things--make-things-list (things)
-  "Return THINGS as a list.
-If THINGS is already a list of things, return it as-is. If it is a single
-thing (with or without an adjustment), return a new list with it as the only
-item."
-  (if (and (listp things)
-           (not (things--adjusted-thing-p things)))
-      things
-    (list things)))
-
 ;; TODO this isn't sufficient if not using symbol plist
 (defun things-clone-thing (new-thing old-thing)
   "Create NEW-THING as a copy of OLD-THING.
@@ -121,7 +127,8 @@ modified after calling this."
 ;; * Default Thingatpt Compatability Layer
 (defun things-base-bounds (thing)
   "Call `bounds-of-thing-at-point' with THING.
-This will ignore the adjustment if THING is of the form (adjustment . thing)."
+This will ignore the alterations if THING is of the form '(thing :alteration
+value ...)."
   (bounds-of-thing-at-point (things--base-thing thing)))
 
 (defun things-forward (thing &optional count)
@@ -492,6 +499,23 @@ FNS will be called right to left."
                  :from-end t
                  :initial-value (apply fn1 args)))))
 
+(defun things--apply-adjustment (thing adjustment)
+  "Return THING with a new ADJUSTMENT value."
+  (let ((alterations (if (things--altered-thing-p thing)
+                         (cl-copy-list (cdr thing))
+                       (list))))
+    (cons (things--base-thing thing)
+          (plist-put alterations :adjustment adjustment))))
+
+(defun things-apply-adjustment (things adjustment)
+  "Return THINGS with new ADJUSTMENT values."
+  (if (and (listp things)
+           (not (things--altered-thing-p things)))
+      (mapcar (lambda (thing)
+                (things--apply-adjustment thing adjustment))
+              things)
+    (things--apply-adjustment things adjustment)))
+
 (defun things-get-adjust-function (thing adjustment)
   "Return the function associated with THING to perform ADJUSTMENT.
 If the thing does not have an adjustment function for the specified ADJUSTMENT,
@@ -595,18 +619,18 @@ bounds further to exclude spaces/tabs then newlines."
 
 (defun things--adjusted-bounds (thing/bounds)
   "Adjust and return THING/BOUNDS.
-If the thing in THING/BOUNDS specifies an adjustment (e.g. \"(inner .
-comment)\"), use the thing's corresponding adjustment function to alter the
-bounds in THING/BOUNDS. If the thing does not have a corresponding ADJUSTMENT
-function defined, fall back to the default one if it exists. If there is no
-specified adjustment or there is no available function for the specified
-adjustment, just return THING/BOUNDS."
+If the thing in THING/BOUNDS specifies an adjustment (e.g. '(comment :adjustment
+inner)), use the thing's corresponding adjustment function to alter the bounds
+in THING/BOUNDS. If the thing does not have a corresponding ADJUSTMENT function
+defined, fall back to the default one if it exists. If there is no specified
+adjustment or there is no available function for the specified adjustment, just
+return THING/BOUNDS."
   (let* ((thing (car thing/bounds))
+         (base-thing (things--base-thing thing))
+         (adjustment (things--alteration thing :adjustment))
          (adjust-function
-          (when (things--adjusted-thing-p thing)
-            (let* ((adjustment (car thing))
-                   (base-thing (cdr thing)))
-              (things-get-adjust-function base-thing adjustment)))))
+          (when adjustment
+            (things-get-adjust-function base-thing adjustment))))
     (if adjust-function
         (funcall adjust-function thing/bounds)
       thing/bounds)))
