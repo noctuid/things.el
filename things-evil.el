@@ -109,7 +109,7 @@ Do save/reset the point/window if the current evil operator is in
     (setq things-evil--reset-position t
           things-evil--reset-window (get-buffer-window))))
 
-(defun things--reset-position ()
+(defun things-evil--reset-position ()
   "Reset the point and window to the previously store point and window.
 The point and window are not restored if there is a selection or if there is no
 stored point/window."
