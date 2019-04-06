@@ -92,6 +92,15 @@ item."
       things
     (list things)))
 
+;; TODO this isn't sufficient if not using symbol plist
+(defun things-clone-thing (new-thing old-thing)
+  "Create NEW-THING as a copy of OLD-THING.
+This just sets the symbol plist of NEW-THING to the symbol plist of OLD-THING.
+This is similar to `defalias', but the intent is that NEW-THING be further
+modified after calling this."
+  (setplist new-thing (symbol-plist old-thing)))
+
+;; * Motion Helpers
 ;; TODO better name?
 (defmacro things-return-point-if-changed (&rest body)
   "Run the forms BODY and return the `point' if it has changed."
@@ -116,13 +125,52 @@ new position. Otherwise return nil."
              (funcall ,op ,count)
            ,@body)))))
 
-;; TODO this isn't sufficient if not using symbol plist
-(defun things-clone-thing (new-thing old-thing)
-  "Create NEW-THING as a copy of OLD-THING.
-This just sets the symbol plist of NEW-THING to the symbol plist of OLD-THING.
-This is similar to `defalias', but the intent is that NEW-THING be further
-modified after calling this."
-  (setplist new-thing (symbol-plist old-thing)))
+;; TODO look at `evil-motion-loop'
+;; TODO at some point may need to know the number of succesful iterations, so
+;; consider returning that instead of the point (could, for example, build
+;; another function on top of that fails if not able to move exactly count
+;; times)
+(defmacro things-move-with-count (count &rest body)
+  "While COUNT is positive, run BODY.
+If the point does not change after an iteration of body, stop there and leave
+the point as-is. This means that the BODY should move the point on success and
+keep the point as-is on failure. If the point moves at least once, return the
+new point. Otherwise return nil."
+  (declare (indent 1) (debug t))
+  (let ((start-pos (cl-gensym))
+        (_ (cl-gensym)))
+    `(things-return-point-if-changed
+       (cl-dotimes (,_ ,count)
+         (let ((,start-pos (point)))
+           ,@body
+           (when (= ,start-pos (point))
+             (cl-return)))))))
+
+;; TODO use more? name better?
+(defmacro things--reset-pos-when-nil (&rest body)
+  (declare (indent 0) (debug t))
+  (let ((orig-pos (cl-gensym))
+        (ret (cl-gensym)))
+    `(let* ((,orig-pos (point))
+            (,ret (progn ,@body)))
+       (if ,ret
+           ,ret
+         (goto-char ,orig-pos)
+         nil))))
+
+(defmacro things-move-while-not (predicate &rest body)
+  "Run BODY until PREDICATE is met or BODY doesn't move the point.
+When PREDICATE returns non-nil for a position, return that position. Otherwise
+return nil and don't move the point."
+  (declare (indent 1) (debug t))
+  (let ((success (cl-gensym)))
+    `(things--reset-pos-when-nil
+       (let (,success)
+         (while (and (things-return-point-if-changed
+                       ,@body)
+                     ;; need to know if predicate ever succesful
+                     (not (setq ,success ,predicate))))
+         ,success))))
 
 ;; * Default Thingatpt Compatability Layer
 (defun things-base-bounds (thing)
@@ -1079,38 +1127,6 @@ form (thing . bounds). Otherwise return nil."
     ;;          "\\")
     (save-match-data
       (things--looking-back escape-regexp))))
-
-;; TODO look at `evil-motion-loop'
-;; TODO at some point may need to know the number of succesful iterations, so
-;; consider returning that instead of the point (could, for example, build
-;; another function on top of that fails if not able to move exactly count
-;; times) 
-(defmacro things-move-with-count (count &rest body)
-  "While COUNT is positive, run BODY.
-If the point does not change after an iteration of body, stop there and leave
-the point as-is. This means that the BODY should move the point on success and
-keep the point as-is on failure. If the point moves at least once, return the
-new point. Otherwise return nil."
-  (declare (indent 1) (debug t))
-  (let ((start-pos (cl-gensym)))
-    `(things-return-point-if-changed
-       (cl-dotimes (_ ,count)
-         (let ((,start-pos (point)))
-           ,@body
-           (when (= ,start-pos (point))
-             (cl-return)))))))
-
-;; TODO use more? name better?
-(defmacro things--reset-pos-when-nil (&rest body)
-  (declare (indent 0) (debug t))
-  (let ((orig-pos (cl-gensym))
-        (ret (cl-gensym)))
-    `(let* ((,orig-pos (point))
-            (,ret (progn ,@body)))
-       (if ,ret
-           ,ret
-         (goto-char ,orig-pos)
-         nil))))
 
 ;; ** Comment
 ;; TODO most of this should be part of core Emacs (e.g. newcomment.el) or at
