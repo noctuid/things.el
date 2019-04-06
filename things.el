@@ -381,23 +381,25 @@ BACKWARD-ONLY, PREFER-BACKWARD, and PREFER-CLOSEST. The only difference is that
     (setq bound-function (lambda (&rest _))))
   (let* ((forward-positions
           (unless backward-only
-            (mapcar (lambda (thing)
-                      (save-excursion
-                        (when (things--seek-forward thing 1
-                                                    (funcall bound-function))
-                          (cons thing (point)))))
-                    things)))
+            (remove nil
+                    (mapcar (lambda (thing)
+                              (save-excursion
+                                (when (things--seek-forward
+                                       thing 1 (funcall bound-function))
+                                  (cons thing (point)))))
+                            things))))
          (sorted-forward-positions (cl-sort forward-positions #'< :key #'cdr))
          (closest-forward-thing/pos (car sorted-forward-positions))
 
          (backward-positions
           (unless forward-only
-            (mapcar (lambda (thing)
-                      (save-excursion
-                        (when (things--seek-backward thing 1
-                                                     (funcall bound-function t))
-                          (cons thing (point)))))
-                    things)))
+            (remove nil
+                    (mapcar (lambda (thing)
+                              (save-excursion
+                                (when (things--seek-backward
+                                       thing 1 (funcall bound-function t))
+                                  (cons thing (point)))))
+                            things))))
          (sorted-backward-positions (cl-sort backward-positions #'> :key #'cdr))
          (closest-backward-thing/pos (car sorted-backward-positions))
 
