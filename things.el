@@ -100,6 +100,14 @@ This is similar to `defalias', but the intent is that NEW-THING be further
 modified after calling this."
   (setplist new-thing (symbol-plist old-thing)))
 
+(defun things--thing/bounds-p (val)
+  "Return whether VAL is in the form (thing . (beg . end))."
+  (and (consp val)
+       (symbolp (car val))
+       (consp (cdr val))
+       (numberp (cadr val))
+       (numberp (cddr val))))
+
 ;; * Motion Helpers
 ;; TODO better name?
 (defmacro things-return-point-if-changed (&rest body)
@@ -114,7 +122,7 @@ modified after calling this."
            ,final-pos)))))
 
 (defmacro things--run-op-or (thing op-sym count &rest body)
-  "If THING has an OP-SYM property, run it with COUNT.
+  "If THING has an OP-SYM property, run it with THING and COUNT.
 Otherwise call FALLBACK-OP with THING and COUNT. If the point moves, return the
 new position. Otherwise return nil."
   (declare (indent 3))
@@ -122,7 +130,7 @@ new position. Otherwise return nil."
     `(things-return-point-if-changed
        (let ((,op (things--get ,thing ,op-sym)))
          (if ,op
-             (funcall ,op ,count)
+             (funcall ,op ,thing ,count)
            ,@body)))))
 
 ;; TODO look at `evil-motion-loop'
@@ -132,15 +140,15 @@ new position. Otherwise return nil."
 ;; times)
 (defmacro things-move-with-count (count &rest body)
   "While COUNT is positive, run BODY.
-If the point does not change after an iteration of body, stop there and leave
-the point as-is. This means that the BODY should move the point on success and
-keep the point as-is on failure. If the point moves at least once, return the
-new point. Otherwise return nil."
+COUNT defaults to 1 if nil. If the point does not change after an iteration of
+body, stop there and leave the point as-is. This means that the BODY should move
+the point on success and keep the point as-is on failure. If the point moves at
+least once, return the new point. Otherwise return nil."
   (declare (indent 1) (debug t))
   (let ((start-pos (cl-gensym))
         (_ (cl-gensym)))
     `(things-return-point-if-changed
-       (cl-dotimes (,_ ,count)
+       (cl-dotimes (,_ (or ,count 1))
          (let ((,start-pos (point)))
            ,@body
            (when (= ,start-pos (point))
@@ -172,41 +180,201 @@ return nil and don't move the point."
                      (not (setq ,success ,predicate))))
          ,success))))
 
+;; * Constraint Helpers
+(defvar things--narrowed-bounds nil
+  "The bouns of the current narrowing.")
+
+(defmacro things--with-narrowing (bounds &rest body)
+  "Narrow buffer to BOUNDS while running BODY."
+  (declare (indent 1) (debug t))
+  `(save-restriction
+     (save-excursion
+       (narrow-to-region (car ,bounds) (cdr ,bounds))
+       (let ((things--narrowed-bounds ,bounds))
+         ,@body))))
+
+;; ** :constraint
+(defmacro things-with-constraint (things require &rest body)
+  "When inside THINGS, run BODY with the buffer narrowed to the bounds.
+The point is not consider to be inside a thing if it is on the edge of it. If
+THINGS is nil, run BODY without narrowing. If REQUIRE is non-nil, do nothing if
+there are no THINGS at the point. Otherwise run BODY without narrowing if no
+THINGS at the point. If REQUIRE is nil and BODY returns nil, try running BODY
+again without narrowing."
+  (declare (indent 2) (debug t))
+  (let ((bounds (cl-gensym)))
+    `(if (null ,things)
+         ;; so can use unconditionally even if no constraining things
+         (progn ,@body)
+       (let ((,bounds (cdr (things-bounds ,things))))
+         (if (and ,bounds
+                  ;; TODO are there any situations where the boundary
+                  ;; of a thing should still be considered inside it?
+                  ;; if so, add a new property that the thing
+                  ;; definition should set
+                  (things--point-inside-p (point) ,bounds))
+             (or (things--with-narrowing ,bounds
+                   ,@body)
+                 (unless ,require
+                   ,@body))
+           (unless ,require
+             ,@body))))))
+
+;; ** :ignore
+;; TODO this is an initial naive/awful implementation for simplicity sake; map
+;; points in a temp buffer that has ignored things removed to point in original
+;; buffer
+;; TODO only set this text property for necessary positions or use a different
+;; solution using markers (e.g. could record where text is deleted); text
+;; properties are very much not ideal (e.g. special handling for point max)
+(defun things--orig-buffer-pos (&optional pos)
+  "Return the value for 'things-orig-buffer-pos at POS or the point.
+If there is no property for 'things-orig-buffer-pos at POS, return POS."
+  (unless pos
+    (setq pos (point)))
+  (if (= pos (point-max))
+      ;; TODO this will fail if point-max = point-min
+      (1+ (things--orig-buffer-pos (1- pos)))
+    (or (get-text-property pos 'things-orig-buffer-pos)
+        pos)))
+
+(defun things--offset-bounds (bounds)
+  "Return BOUNDS adjusted to match positions in original buffer.
+This function will not alter the original BOUNDS. BOUNDS can either be in the
+form (beg . end) or in the form (thing . (beg . end)). See also
+`things--orig-buffer-pos'. If BOUNDS is nil, return nil."
+  (when bounds
+    (let* ((thing/bounds-p (things--thing/bounds-p bounds))
+           (thing (when thing/bounds-p
+                    (car bounds)))
+           (new-bounds (cl-copy-list
+                        (if thing/bounds-p
+                            (cdr bounds)
+                          bounds))))
+      (when new-bounds
+        (setf (car new-bounds) (things--orig-buffer-pos (car new-bounds)))
+        (setf (cdr new-bounds) (things--orig-buffer-pos (cdr new-bounds))))
+      (if thing/bounds-p
+          (cons thing new-bounds)
+        new-bounds))))
+
+(defun things--point-buffer (&optional point-min-offset)
+  "Set 'things-orig-buffer-text-property for every position in the buffer.
+This only works in a temporary buffer copy before making any changes. If
+POINT-MIN-OFFSET is non-nil, start with 1+ that number instead of 1."
+  (save-excursion
+    (goto-char (point-min))
+    (while (not (= (point) (point-max)))
+      (put-text-property (point) (1+ (point))
+                         'things-orig-buffer-pos
+                         (+ (point) point-min-offset))
+      (forward-char))))
+
+(defmacro things--with-temp-buffer-copy (&rest body)
+  "Run BODY in a temporary buffer that is a copy of the current one.
+Prior to running body, set the 'things-orig-buffer-pos text property for each
+position in the temporary buffer."
+  (declare (indent 0))
+  (let ((old-buffer (cl-gensym))
+        (old-mode (cl-gensym))
+        (old-point (cl-gensym))
+        (point-min-offset (cl-gensym)))
+    `(let ((,old-buffer (current-buffer))
+           (,old-mode major-mode)
+           ;; handle narrowing
+           (,old-point (point))
+           (,point-min-offset (1- (point-min))))
+       (with-temp-buffer
+         (insert-buffer ,old-buffer)
+         ;; TODO will this always work?
+         (funcall ,old-mode)
+         (things--point-buffer ,point-min-offset)
+         (goto-char (- ,old-point ,point-min-offset))
+         ,@body))))
+
+(defun things--remove-things (things &optional keep-if-current)
+  "Remove the text for all THINGS in the current buffer.
+If KEEP-IF-CURRENT is non-nil, don't delete the a thing that the point is
+inside."
+  (save-excursion
+    ;; TODO could maybe use a marker and ignore the positions in the original
+    ;; buffer
+    (let ((orig-pos (things--orig-buffer-pos (point)))
+          thing/bounds)
+      (goto-char (point-min))
+      (while (and (setq bounds (cdr (things-seeking-bounds things)))
+                  (if (and keep-if-current
+                           ;; can't just check if inside thing because may be
+                           ;; inside a thing with an unmatched paren, for
+                           ;; example; in that case would want to try again
+                           ;; without narrowing and remove string with unmatched
+                           ;; paren even though the point is in it
+                           things--narrowed-bounds
+                           (equal (things--offset-bounds bounds)
+                                  things--narrowed-bounds))
+                      (things-seek-forward things 1 nil)
+                    (delete-region (car bounds) (cdr bounds))
+                    t))))))
+
+;; TODO this will be unusably slow without a :constraint
+;; potential for faster alternative (so don't have to go through entire buffers)
+;; - get bounds of thing without removing ignored things
+;; - check if any ignored things inside or at edges of bounds and remove them
+;;   and try again until no things inside
+(defmacro things-with-removed-things (things keep-if-current &rest body)
+  "With a temporary buffer that has THINGS removed, run BODY.
+If BODY returns a bounds cons (beg . end), adjust the bounds to match those in
+the original buffer. If THINGS is nil, just run BODY. If KEEP-IF-CURRENT is
+non-nil, don't remove any THINGS that the point is inside of (if the point is at
+the boundary of a thing, it is not considered inside it)."
+  (declare (indent 2) (debug t))
+  (let ((bounds (cl-gensym))
+        (non-things (cl-gensym)))
+    `(if (null ,things)
+         ;; so can use unconditionally even if no constraining things
+         (progn ,@body)
+       (things--with-temp-buffer-copy
+         (things--remove-things ,things ,keep-if-current)
+         (things--offset-bounds ,@body)))))
+
 ;; * Default Thingatpt Compatability Layer
 (defun things-base-bounds (thing)
   "Call `bounds-of-thing-at-point' with THING.
-This will ignore the alterations if THING is of the form '(thing :alteration
-value ...)."
-  (bounds-of-thing-at-point (things--base-thing thing)))
+This will ignore :adjustment alterations but will handle constraint
+alterations."
+  (let ((outer (things--alteration thing :constraint))
+        (outer-optional (things--alteration thing :optional-constraint))
+        (inner (things--alteration thing :ignore)))
+    ;; TODO better names; :fence?
+    ;; TODO just use :predicate for "always" ignore functionality
+    ;; nesting `things-with-removed-things' won't really work
+    (things-with-constraint outer t
+      (things-with-constraint outer-optional nil
+        (things-with-removed-things inner t
+          (bounds-of-thing-at-point (things--base-thing thing)))))))
 
 (defun things-forward (thing &optional count)
   "Move to the next THING end COUNT times.
 With a negative COUNT, move to the previous THING beginning COUNT times. Unlike
 `forward-thing', this function has a well-defined behavior on failure. If able
 to move at least once, return the new position. Otherwise return nil."
-  (unless count
-    (setq count 1))
-  (setq thing (things--base-thing thing))
-  (let ((orig-pos (point)))
-    (forward-thing thing count)
-    (unless (= (point) orig-pos)
-      (let ((bounds
-             (save-excursion
-               ;; may have moved to a point in between two things, so move
-               ;; backwards one character
-               ;; TODO ensure this is sufficient or repurpose
-               ;; `things--after-seek-bounds' to be usable here
-               (unless (or (cl-minusp count)
-                           (= (point) (point-min)))
-                 (backward-char))
-               (things-base-bounds thing))))
-        (if (and bounds
-                 (= (point) (if (cl-plusp count)
-                                (cdr bounds)
-                              (car bounds))))
-            (point)
-          (goto-char orig-pos)
-          nil)))))
+  (things-move-with-count count
+    (things-move-while-not
+        (let ((bounds
+               (save-excursion
+                 ;; may have moved to a point in between two things, so move
+                 ;; backwards one character
+                 ;; TODO ensure this is sufficient or repurpose
+                 ;; `things--after-seek-bounds' to be usable here
+                 (unless (or (cl-minusp count)
+                             (= (point) (point-min)))
+                   (backward-char))
+                 (things-base-bounds thing))))
+          (and bounds
+               (= (point) (if (cl-plusp count)
+                              (cdr bounds)
+                            (car bounds)))))
+      (forward-thing (things--base-thing thing)))))
 
 (defun things-backward (thing &optional count)
   "Move to the previous THING beginning COUNT times.
@@ -218,15 +386,16 @@ to move at least once, return the new position. Otherwise return nil."
   (things-forward thing (- count)))
 
 ;; * Seeking
+;; TODO remove this entirely?
 (defun things-bound (&optional backward)
   "Return the bound to be used when seeking forward or backward.
 BACKWARD specifies that the bound should be for seeking backward. This function
 is used by bounds functions that use seeking. This default function restricts
-seeking to between the beginning and end of the window. A custom function can be
+seeking to between the beginning and end of the buffer. A custom function can be
 used by changing the `things-bound' variable."
   (if backward
-      (window-start)
-    (window-end)))
+      (point-min)
+    (point-max)))
 
 (defun things--seeks-to-end-p (thing &optional backward)
   "Return whether seeking forward for THING will go to the thing end.
@@ -278,7 +447,6 @@ corresponding to the thing that the point is at the end of."
   "Call THING's things-seek-op or `things-forward' with COUNT."
   (unless count
     (setq count 1))
-  (setq thing (things--base-thing thing))
   (things--run-op-or thing 'things-seek-op count
     (things-forward thing count)))
 
@@ -686,6 +854,15 @@ return THING/BOUNDS."
       thing/bounds)))
 
 ;; * Bounds at Point
+;; TODO make public?
+(defun things--point-inside-p (pos bounds)
+  "Return whether POS or the point is inside BOUNDS.
+POS is considered to be inside BOUNDS if it is in between BOUNDS but not
+exactly the beginning or end position."
+  (unless pos
+    (setq pos (point)))
+  (< (car bounds) pos (cdr bounds)))
+
 (defun things--bounds-inside-p (current-bounds bounds)
   "Return whether CURRENT-BOUNDS is inside and not exactly BOUNDS."
   (and (not (equal bounds current-bounds))
@@ -781,8 +958,9 @@ starts first."
 (defun things-bounds (things &optional current-bounds)
   "Get the smallest bounds of a thing at point in THINGS.
 If CURRENT-BOUNDS is non-nil, only consider bounds that encompass the current
-bounds. If successful, return a cons of the form (thing . bounds). Otherwise
-return nil."
+bounds. If successful, return a cons of the form (thing . bounds). Otherwise, if
+there are no THINGS at the point or none of them have bounds greater than
+CURRENT-BOUNDS, return nil."
   ;; no bound or checks based on window beginning/end; always should return the
   ;; same bounds for the same point
   (setq things (things--make-things-list things))
@@ -881,10 +1059,10 @@ It is recommended to use `things-growing-or-seeking-bounds' instead unless you
 explicitly do not need/want to support region expansion/extension.
 
 If CURRENT-BOUNDS is non-nil, only consider bounds that encompass
-CURRENT-BOUNDS. If no thing at point, seek using `things-seek' and ignore
-CURRENT-BOUNDS. Seeking is bounded by BOUND-FUNCTION which defaults to
-`things-bound'. If successful, return a cons of the form (thing . bounds).
-Otherwise return nil."
+CURRENT-BOUNDS. If no thing at point or no thing at point with bounds greater
+than CURRENT-BOUNDS, seek using `things-seek' and ignore CURRENT-BOUNDS. Seeking
+is bounded by BOUND-FUNCTION which defaults to `things-bound'. If successful,
+return a cons of the form (thing . bounds). Otherwise return nil."
   (or (things-bounds things current-bounds)
       (save-excursion
         (when (things-seek things 1 (or bound-function #'things-bound))
@@ -894,10 +1072,11 @@ Otherwise return nil."
                                                 bound-function)
   "Get the smallest bounds of a thing in THINGS.
 Then expand/extend bounds COUNT - 1 times (or COUNT times if CURRENT-BOUNDS is
-non-nil). If no thing at point, seek using `things-seek' and ignore COUNT and
-CURRENT-BOUNDS. Seeking is bounded by BOUND-FUNCTION which defaults to
-`things-bound'. If successful in finding a thing bounds, return a cons of the
-form (thing . bounds). Otherwise return nil."
+non-nil). If no thing at point or no thing at point with bounds greater than
+CURRENT-BOUNDS, seek using `things-seek' and ignore COUNT and CURRENT-BOUNDS.
+Seeking is bounded by BOUND-FUNCTION which defaults to `things-bound'. If
+successful in finding a thing bounds, return a cons of the form (thing .
+bounds). Otherwise return nil."
   (or (things-growing-bounds things count current-bounds)
       ;; it is possible for growing to fail but there to still be a thing just
       ;; after the region, e.g. ~...|(foo); check here to prevent seeking past
@@ -1590,12 +1769,17 @@ With a negative count, go to the previous valid beginning of the pair."
   (put name 'forward-op
        (lambda (&optional count)
          (things--forward-char-pair open close count)))
-  (put name 'thigns-alt-forward-op
-       (lambda (&optional count)
+  (put name 'things-alt-forward-op
+       (lambda (_thing &optional count)
          (things--alt-forward-char-pair open close count)))
   (put name 'things-seek-op
-       (lambda (&optional count)
-         (things--seek-char-pair open close count)))
+       (lambda (thing &optional count)
+         ;; TODO this should be easier on the implementor
+         (things-move-with-count count
+           (things-move-while-not
+               (let ((bounds (things-base-bounds thing)))
+                 (and bounds (= (point) (car bounds))))
+             (things--seek-char-pair open close count)))))
   (put name 'things-seeks-forward-begin t)
   (put name 'things-no-extend t)
   (put name 'things-overlay-position #'point)
