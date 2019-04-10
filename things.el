@@ -433,7 +433,9 @@ corresponding to the thing that the point is at the end of."
                       ;; e.g. )|)
                       (= (point) (cdr bounds))))
             (save-excursion
-              (backward-char)
+              ;; shouldn't be at point-min, but this function shouldn't fail
+              (unless (= (point) (point-min))
+                (backward-char))
               (let ((bounds (things-base-bounds thing)))
                 ;; e.g. should not use previous bounds for (|(; this can only
                 ;; happen when things-seeks-forward-begin is not set correctly
@@ -467,6 +469,7 @@ new position. Otherwise return nil."
   (let ((orig-pos (point))
         (initial-bounds (things-base-bounds thing))
         seek-start-pos)
+    ;; TODO can fail early here
     ;; go to the end of the current or next thing
     (things--try-seek thing)
     ;; using `things--after-seek-bounds' because may have moved to the end of a
