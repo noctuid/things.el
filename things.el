@@ -358,6 +358,8 @@ alterations."
 With a negative COUNT, move to the previous THING beginning COUNT times. Unlike
 `forward-thing', this function has a well-defined behavior on failure. If able
 to move at least once, return the new position. Otherwise return nil."
+  (unless count
+    (setq count 1))
   (things-move-with-count count
     (things-move-while-not
         (let ((bounds
