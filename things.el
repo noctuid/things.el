@@ -121,17 +121,24 @@ modified after calling this."
          (unless (= ,final-pos ,orig-pos)
            ,final-pos)))))
 
-(defmacro things--run-op-or (thing op-sym count &rest body)
-  "If THING has an OP-SYM property, run it with THING and COUNT.
-Otherwise call FALLBACK-OP with THING and COUNT. If the point moves, return the
-new position. Otherwise return nil."
-  (declare (indent 3))
+(cl-defmacro things--run-op-or (thing (op-sym &rest args) &rest body)
+  "If THING has an OP-SYM property, run it with ARGS.
+Otherwise run BODY."
+  (declare (indent 2))
   (let ((op (cl-gensym)))
-    `(things-return-point-if-changed
-       (let ((,op (things--get ,thing ,op-sym)))
-         (if ,op
-             (funcall ,op ,thing ,count)
-           ,@body)))))
+    `(let ((,op (things--get ,thing ,op-sym)))
+       (if ,op
+           (apply ,op (list ,@args))
+         ,@body))))
+
+(cl-defmacro things--run-motion-op-or (thing (op-sym &rest args) &rest body)
+  "If THING has an OP-SYM property, run it with ARGS.
+Otherwise run BODY. If the point moves, return the new position. Otherwise
+return nil."
+  (declare (indent 2))
+  `(things-return-point-if-changed
+     (things--run-op-or ,thing (,op-sym ,@args)
+       ,@body)))
 
 ;; TODO look at `evil-motion-loop'
 ;; TODO at some point may need to know the number of succesful iterations, so
@@ -351,7 +358,8 @@ alterations."
     (things-with-constraint outer t
       (things-with-constraint outer-optional nil
         (things-with-removed-things inner t
-          (bounds-of-thing-at-point (things--base-thing thing)))))))
+          (things--run-op-or thing ('things-bounds-of-thing-at-point)
+            (bounds-of-thing-at-point (things--base-thing thing))))))))
 
 (defun things-forward (thing &optional count)
   "Move to the next THING end COUNT times.
@@ -451,7 +459,7 @@ corresponding to the thing that the point is at the end of."
   "Call THING's things-seek-op or `things-forward' with COUNT."
   (unless count
     (setq count 1))
-  (things--run-op-or thing 'things-seek-op count
+  (things--run-motion-op-or thing ('things-seek-op thing count)
     (things-forward thing count)))
 
 (defun things--min (&rest numbers)
@@ -655,7 +663,7 @@ at least once, return the new position. Otherwise return nil."
   (unless count
     (setq count 1))
   (setq thing (things--base-thing thing))
-  (things--run-op-or thing 'things-alt-forward-op count
+  (things--run-motion-op-or thing ('things-alt-forward-op count)
     (when (things--seek-forward thing count)
       (let ((bounds (things-base-bounds thing)))
         ;; with properly implemented underlying functions, seeking should
@@ -1854,10 +1862,21 @@ When INCLUDE-BUFFER-BOUNDS is non-nil, a separator thing can start at the buffer
 beginning or end at the buffer end."
   (put name 'forward-op
        (lambda (&optional count)
-         (things--forward-separator separator count)))
-  ;; (put name 'bounds-of-thing-at-point
-  ;;      (lambda ()
-  ;;        (things--bounds-of-separator-at-point separator)))
+         (things--forward-separator separator count include-buffer-bounds)))
+  (put name 'things-bounds-of-thing-at-point
+       (lambda ()
+         (let ((bounds (bounds-of-thing-at-point name)))
+           (if include-buffer-bounds
+               (when (and bounds
+                          ;; require at least one separator
+                          (or (save-excursion
+                                (goto-char (car bounds))
+                                (looking-at separator))
+                              (save-excursion
+                                (goto-char (cdr bounds))
+                                (looking-at separator))))
+                 bounds)
+             bounds))))
   (put name 'things-get-inner
        (lambda (thing/bounds)
          (things-shrink-by-regexp thing/bounds separator nil)))
