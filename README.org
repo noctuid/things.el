@@ -3,7 +3,8 @@
 
 That said, you can start using the specification provided here to help you implement things even without =things.el= today. The instructions here can help you consider important edge cases and easily switch to using =things.el= in the future.
 
-* =things.el= Summary
+* About
+** =things.el= Summary
 The goal of this package is to provide a library that makes implementing things/text objects as simple as possible (and with no dependence on =evil=). It is built on top of =thingatpt=. The idea is that Emacs' builtin =thingatpt= is a great way to implement things/text objects but could be improved by providing a larger, precise specification for how to implement things that considers additional functionality such as seeking as well as edges cases (especially with regards to nestable things).
 
 With this package, it should be much easier and in some cases trivial to define new things/text objects. The idea is that you implement a minimal set of required functions to describe how your thing should behave, and then =things.el= does the rest of the work such as handling counts, seeking, remote selection with =avy=, etc.
@@ -12,7 +13,7 @@ With this package, it should be much easier and in some cases trivial to define 
 
 The hope is to provide support for enough things and types of things out of the box, so that mass adoption is not first required for the library to be useful.
 
-* Thing Functionality
+** Thing Functionality
 This library allows creating things with extra functionality including:
 - composite things (e.g. a paren, bracket, or curly brace thing)
 - nestable things
@@ -21,11 +22,12 @@ This library allows creating things with extra functionality including:
 - getting thing bounds with overlays (optional dependency on avy)
 - bounds/region extension/expansion
 - arbitrary bounds adjustment (e.g. to get the bounds of an "inner list")
+- constraints; for example require a thing to be inside another thing; this is used to implement arguments (e.g. a comma separator constrained to a paren)
 - (forward|backward)-<optional adjustment>-<thing>-(begin|end) motion generation
 
 Motion function generation and region expansion are incidental features. I do not personally use region expansion and recommend using precise things/text objects instead. With remote text objects, you can use avy to precisely select a thing without having to calculate a count. As for motions, the main focus is on text objects, but since the functions required to implement text objects can also be used to implement motions, it makes sense to provide support for creating both text objects and motions.
 
-* Comparison to Evil
+** Comparison to Evil
 My prior package =targets.el= is a mess in large part due to being built on top of =evil=. Evil builds upon =thingatpt= as well, but not in a way that is very suitable for use as a library for implementing text objects. For this reason, I decided to rewrite targets using =thingatpt= only.
 
 For example, evil implements seeking and growing in non-reusable and incompatible ways for different types of text objects (e.g. see ~evil-select-an-object~, ~evil-select-block~, ~evil-select-quote-thing~, etc.). Evil also falls back to seeking inside its text object selection functions, meaning that extra checks are required to determine whether there is a valid text object at the point or if evil had to search to find one. =things.el= instead segragates and composes different functionality including seeking, making it more suitable for generic usage as a library. Trying to support composite text objects was also a challenge in =targets.el=. =targets.el= has separate functions for defining composite text objects, and they don't behave quite correctly in many circumstances. =things.el= has first-class support for handling composite things and handles them even in its lower level functions, making it much easier to support sane behavior.
@@ -33,6 +35,609 @@ For example, evil implements seeking and growing in non-reusable and incompatibl
 The other primary problem I had trying to build =targets.el= on top of evil is the lack of a consistent interface (i.e. no single select function). =targets.el= has 4 different types of things: =pair=, =separator=, =quote=, and =object=. This is because I had to wrap 4+ different ~evil-select-...~ functions. Really, I just wanted to use =object=. =things.el= has a single "select" function (~things-bounds~) that works for anything. Again, the concept of "pairs" and "separators" is instead supported at a separate, higher level.
 
 Finally, text objects are useful regardless of the keybinding system and should not require evil.
+
+* Use as a Library
+This section provides information on the functions =things.el= provides for existing things. For information on implementing new things, see [[#implementing-new-things-and-definers][Implementing New Things and Definers]]. things.el provides helpers to automatically implement some groups of things (e.g. pairs like =(= and =)= or ={= and =}=); for more information, see [[#thing-definers][Thing Definers]].
+
+** Naming Conventions
+First note that any function marked with =--= is internal and not guaranteed to stay the same. You should only rely on the public API documented here (and /only after a =1.0= release/). If you would like to use an internal function, feel free to make an issue suggesting it become part of the library.
+
+=bound=, =bounds=, and =thing/bounds= are common argument names. =bound= corresponds to a single position (e.g. a one-sided bound for a search). =bounds= corresponds to a two-sided boundary. This is representend using a cons in the form =(beg . end)= and normally corresponds to the positions that bound a thing. =thing/bounds= is a combination of a thing and bounds. It is currently represented cons in the form =(thing . bounds)= that denotes the name of the thing the bounds are for.
+
+** Mark and Point Notation
+For examples used here, =~= corresponds to the mark, and =|= corresponds to the point. In this example, the text "bar" is marked:
+#+begin_src emacs-lisp
+foo ~bar| baz
+#+end_src
+
+If you are an evil user, note that the point is used in examples as if in emacs or insert state. =|= would be the end of the block cursor in normal state. For example, the result of the default =vi(= would be written like this:
+#+begin_src emacs-lisp
+(~foo|)
+#+end_src
+
+** Compatibility Layer
+Things uses =thingatpt.el= functions sparingly (in the future, it might not need to directly depend on =thingatpt.el= at all) and only through these wrappers:
+
+- ~things-base-bounds~ - things.el version of ~bounds-of-thing-at-point~
+- ~things-forward~ - things.el version of ~forward-thing~
+
+See their docstrings for more information. For now these are labeled as public, but they may become internal in the future since they do not support the full set of things.el features (e.g. composite things).
+
+** Full-Featured Functions
+All of these functions support a list of things (as an alternative to a single thing) as an argument and support thing alterations (more details in [[#composite-things][Composite Things]] and [[#alterations][Alterations]]).
+
+*** Seeking and Bounds
+- ~things-seek~ (and ~things-seek-forward~ and ~things-seek-backward~) - seek to the next/previous thing with a count
+- ~things-bounds~ - get the bounds of a thing at the point
+- ~things-growing-bounds~ - get the bounds of a thing and/or grow it with count if possible
+- ~things-seeking-bounds~ - get the bounds of the next or previous thing if no thing at point
+- ~things-(next|previous)-bounds~ - go to next/previous thing a given number of times
+- ~things-growing-or-seeking-bounds~ - get/grow the thing at point a given number of times or seek to next or previous thing once
+- ~things-remote-bounds~ - get the bounds of a thing in the window selected with avy
+
+See their docstrings for more information. The main two functions provided are ~things-bounds~ and ~things-seek~. The other function are just built on top of them.
+
+*** Motions
+*Not yet implemented*
+
+- ~things-beginning~ - move to the beginning of the current thing
+- ~things-end~ - move to the end of the current thing
+
+~things-forward-end~, ~things-forward-begin~, etc. will just be simple functions built on top of the seeking/bounds functions.
+
+** Composite Things
+=things.el= functions allow specifying multiple things instead of one. This allows the creation of things like the anyblock packages had. For example, to get the bounds of a paren, square bracket, or curly brace thing, you could do this:
+#+begin_src emacs-lisp
+(things-define-pair 'things-paren "(" ")")
+...
+(things-bounds '(things-paren things-bracket things-brace))
+#+end_src
+
+This also allows for expand-region functionality (though remote selection is recommended instead).
+
+For best results, no two distinct things in a composite thing should be able to overlap or to start or end at the same point (feel free to make an issue if you think there could be a reasonable use case for this).
+
+** Alterations
+Once a thing is implemented, it is possible specify additional alterations that will affect its behavior. An unaltered thing is specified with just a symbol ='thing-name=. An altered thing is specified as ='(thing-name :keyword value ...)=.
+
+*** Adjustments
+Adjustments are used to alter the bounds of a thing by, for example, including or excluding whitespace. The adjustments available depend on the specific thing, and things.el supports adding adjustments of any name. The types of adjustments that things.el recognizes by default are as follows:
+
+- =inner=
+- =a=
+- =inside=
+- =around=
+- =linewise=
+
+Here is an example call using an =inner= thing:
+#+begin_src emacs-lisp
+(things-bounds '(things-string :adjustment inner))
+#+end_src
+
+=linewise= just extends the bounds to start at the beginning of a line and end at the end of a line. =inner= and =a= will be familiar to vim/evil users (and =inside= and =around= to targets.vim users). While the behavior of =inner= and =a= depends on the thing, =inside= and =around= always involve excluding or including whitespace respectively. An =inside= thing is an =inner= thing excluding whitespace on both sides. An =around= thing is an =a= thing including whitespace either on the right (preferred) or on the left if no whitespace on the right.
+
+To illustrate, consider a thing delimited by ={= and =}=:
+#+begin_src emacs-lisp
+;; "a" thing or no adjustment
+{ foo: ~{ bar: "baz" }| }
+
+;; "around" thing
+{ foo: ~{ bar: "baz" } |}
+
+;; "inner" thing (exclude delimiting characters)
+{ foo: {~ bar: "baz" |} }
+
+;; "inside" thing (also exclude whitespace)
+{ foo: { ~bar: "baz"| } }
+#+end_src
+
+Here's a practical example use case for =inside=:
+#+begin_src python
+# "inner" docstring
+def foo():
+    """~
+    This is a docstring.
+    |"""
+
+# "inside" docstring; depending on the thing, it could make sense to just have
+# this behavior as the default "inner"; adjustment behavior is customizable and
+# these names are just conventions
+def foo():
+    """
+    ~This is a docstring.|
+    """
+#+end_src
+
+For things that don't have surrounding delimiters, there would generally be no difference between =inner= and =inside= or =a= and =around=:
+#+begin_src emacs-lisp
+;; "inner" or "inside" or no adjustment specified
+~foo| bar
+
+;; "a" or "around"
+~foo |bar
+#+end_src
+
+For information on implementing your own adjustments see [[#defining-adjustments][Defining Adjustments]].
+
+*** Constraints
+*Experimental*
+
+Constraints allow adding smarter behavior on top of existing things. Here are some example use cases:
+- ensure that if a paren thing starts in a string or comment, it must end in that same thing (handles unmatched parens in strings and comments)
+- ensure that if a paren thing does not start in a string or comment, it cannot end in a string or comment (handles unmatched parens in strings and comments)
+- require that a comma separator thing be inside a paren thing (makes an argument thing)
+- prevent escaped parens from being considered part of a paren thing
+
+The current constraint keywords available are as follows (NOTE: *naming is likely to change to become more intuitive*):
+- =:constraint=
+- =:optional-constraint=
+- =:ignore=
+- =:predicate=
+
+**** =:constraint=
+=:constraint= requires the main thing to appear in another thing. For example, ='(things-paren :constraint things-aggregated-comment)= would only consider a paren thing valid if it appeared in a comment. This works using narrowing.
+
+**** =:optional-constraint=
+With =:optional-constraint=, it is fine for the main thing to not appear in the constraint thing. However, if the point /is/ inside the constraint thing, things.el will first narrow to the constraining thing and try to get the bounds of the main thing. If this fails, it will try again without narrowing. This is mainly useful in combination with =:ignore= (see below for an example).
+
+**** =:ignore=
+=:ignore= is used to ignore things that the point is not in. For example, ='(things-paren :ignore things-string)= would ignore the contents of strings. This works running the underlying operations in a buffer that has strings removed where necessary. This is mainly useful in combination with =:constraint= or =:optional-constraint= (see below for an example).
+
+**** =:predicate=
+*Not yet implemented*
+
+=:predicate= just calls a function given the bounds and returns non-nil if the bounds should be considered valid.
+
+**** Combining Constraints
+Often =:optional-constraint= or =:constraint= will be used together with =:ignore=. This is used to ensure that the bounds of the main thing are entirely inside the constraint thing(s) or entirely outside of the constraint thing(s).
+
+For example, if the point is inside a string with an unmatched paren, ~things-bounds~ will ignore the unmatched paren in the string instead of attempting to match it with a paren outside of the string:
+#+begin_src emacs-lisp
+;; with
+(foo "(|" 1)
+;; or with
+(foo "("| 1)
+;; calling
+(things-bounds '(things-paren :optional-constraint things-string
+                              :ignore things-string))
+;; returns the bounds of (foo ...)
+#+end_src
+
+** Builtin Things
+- =things-aggregated-comment= - comment thing that will include all adjacent, aligned line comments or a block comment
+- =things-string= - string thing
+- =things-line= - line thing
+- =things-function= - function or top level form thing
+
+** Thing Definers
+Thing definers are useful for easily implementing things without needing to know the details of how things.el works. Below are the current groups of things that have definers.
+
+*** Pair
+See ~things-define-pair~. A pair thing corresponds to an opening and closing delimiter (e.g. =(= and =)=).
+
+Notes:
+- delimiters must be different
+- pairs are nestable
+- with a count, will first try to grow to surrounding pair and seek on failure
+- default seeking behavior is to go to next the next opening delimiter
+
+Currently only single character delimiters are supported, but regexp delimiters will be supported in the future.
+
+*** Quote
+Not yet implemented.
+
+See ~things-define-quote~. A quote thing corresponds to text inside a single delimiter (e.g. ="=).
+
+Notes:
+- non-nestable
+- with count will always seek (never grow)
+- even though the delimiters are the same, there is an inside and outside (i.e. a start ="= is paired with an end ="=)
+
+Unlike a separator, which can be both an opening and closing delimiter, a quote is one or the other. The first quote in a buffer will be an opening delimiter, and the second will be a closing delimiter. Because matching is required, this is much less efficient than a separator thing; I have not yet tested to see how viable a regexp quote will be (it may only be fast enough with constraints).
+
+In this case, non-nestable means that you normally cannot nest the same type of quote inside itself. It is still possible to nest different types of quotes inside of each other. Also note that with constraints (e.g. ='=), it is possible to support nested quotes, for example, in subshells
+#+begin_src sh
+"$(foo "$bar")"
+# (things-bounds '(things-quote :optional-constraint things-paren :ignore things-paren)) gives
+~"$(foo "$bar")"|
+# not
+~"$(foo "|$bar")"
+#+end_src
+
+*** Separator
+See ~things-define-separator~. A separator thing corresponds to text inside a single delimiter (e.g. =,=) and optionally the buffer beginning or end.
+
+Notes:
+- non-nestable
+- with count will try to grow before seeking
+- each separator can be the start or end of the region of text
+
+*** Argument
+Argument things do not have a definer. Instead, they can be implemented on top of separator and pair things using [[#constraints][Constraints]].
+
+*** Text Properties
+Not yet implemented.
+
+*** Before/After
+# https://github.com/junegunn/vim-after-object
+Not yet implemented
+
+A before or after thing corresponds to text before or after some regexp up to some boundary (usually the beginning or end of the line).
+
+* Implementing New Things and Definers
+*Disclaimer: The specific details of this section are subject to change.*
+
+** What is a Thing?
+Things are regions of text in a buffer (e.g. a word, sentence, paragraph, function, string, etc.). Things are implemented by defining required operations and associating them with a symbol (e.g. ~(put 'my-string 'forward-op #'my-forward-string)~; in the future there will be a =things-define= wrapper).
+
+Thing names should be symbols (excluding keywords, which are used for alterations instead). Things cannot overlap on a single side (i.e. the new thing cannot both start before and end after the end of the old thing), but they can be nestable (i.e. the new thing can appear entirely inside the old thing).
+
+** Why Thingatpt
+I've used =thingatpt.el= as a starting point not just because it is builtin but also because I think it is a great, generic base for describing text objects/things.
+
+At the heart of =thingatpt= is =forward-op= (discussed in detail later). The behavior of =forward-op= is normally to either move to the next end of a thing or to the previous beginning of a thing. This behavior may seem strange at first, especially if you are coming from vim where motions normally move either to the beginning of something in both directions or to the end of something in both directions. However, the behavior makes perfect sense for defining text objects. "forward end" and "backward begin" go to the boundary points of a thing.
+
+While it may or may not be an intentional part of the design of =thingatpt=, it turns out that these are usually the two easier motions to implement as well because you generally don't have to worry about whether the point is at the beginning or end of a thing already. For example, to write a motion to go to the next paren beginning, you couldn't just do ~(when (re-search-forward "(") (goto-char (match-beginning 0)))~ because it would stay at a =(= and cause an infinite loop. You'd have to do something like ~(when (looking-at "(") (goto-char (match-end 0)))~ first. On the other hand, for a motion that goes to the /previous/ paren beginning, you can continuously call ~(re-search-backward "(")~ without issues. Furthermore, it is possible to automatically generate these potentially harder to implement motions using the easier ones, and =things.el= allows you to do this where possible.
+
+The primary downside of =thingatpt= is that it is basic and not robust enough. For example, builtin Emacs ~forward-<something>~ motions do not always have consistent behavior, and =thingatpt= does not provide any documentation for how its various operations should behave (e.g. whether they should move the point on failure, what they should return, etc.).
+
+The following specification is meant to address these issues by describing exactly how to implement the operations necessary to define a thing. =things.el= additionally addresses various edge cases (especially for nestable things), provides various helpers for thing definition, and provides various extra functionality automatically (e.g. seeking, thing collection, adjustments, constraints, extra motions, thing definers, etc.) after the minimal set of operations necessary to define a thing are implemented.
+
+** Implementable Operations and =thingatpt= Basics
+Here is an overview of the implementable operations. When actually implementing thing, it is recommended to use this as references when reading [[#implementing-a-thing][Implementing a Thing]].
+
+*** Summary
+Implementing a thing requires implementing at least =forward-op=. Not all operations are required. The process of picking the necessary operations and then defining them is discussed in detail later (see [[#implementing-a-thing][Implementing a Thing]]).
+
+Here is the list of the basic =thingatpt= operations (also used by =things.el=):
+- =forward-op= (required)
+- =beginning-op=
+- =end-op=
+- =bounds-of-thing-at-point=
+- =thing-at-point=
+
+=things.el= additionally adds these operations:
+- =things-inside=
+- =things-no-extend=
+- =things-seek-op=
+- =things-seeks-forward-begin=
+- =things-seeks-backward-end=
+- =things-overlay-position=
+- =things-get-<adjustment>=
+# =things-extend-<>=
+
+things.el also allows for any number of adjustments. Adjustment operations are named =things-get-<adjustment>= (e.g. =things-get-a=, =things-get-inner=, etc.).
+
+# TODO Similarly, things.el allows for custom extension operations.
+
+=things-inside= is special and is the only required adjustment. It can be the same as =things-get-inner= or =things-get-inside= and is used, for example, by constraints to determine if the point is inside a thing.
+
+*** =thingatpt.el= Basics
+=thingatpt= and =things= use symbol properties to store/obtain these functions:
+#+begin_src emacs-lisp
+(put 'thing-name '<op> #'thing-name-<op>)
+
+;; specific example
+(put 'my-sentence 'forward-op #'my-sentence-forward)
+
+;; for 'forward-op specifically, `forward-thing' will alternatively call
+;; `forward-<thing-name>' if it exists; this should work but using 'forward-op
+;; instead is recommended
+(defun forward-my-sentence ...)
+#+end_src
+
+=thingatpt= in turn uses these functions to provide the following:
+- ~forward-thing~
+  - with a positive count, move to the nth next thing end
+  - with a negative count, move to the nth previous thing beginning
+  - no guaranteed return value (may return nil on success)
+- ~beginning-of-thing~
+  - move to the beginning of the current thing
+  - returns the beginning position on success; errors on failure (can use ~ignore-errors~ to get nil instead)
+- ~end-of-thing~
+  - move to the end of the current thing
+  - returns the end position on success; errors on failure
+- ~bounds-of-thing-at-point~ - return the bounds of the current thing or errors if no thing at point
+- ~thing-at-point~ - return the text corresponding to the current thing or nil if no thing at point
+
+This is just for reference. When using =things.el=, you should always use ~things-<...>~ functions (see [[#use-as-a-library][Use as a Library]]). One major difference is that =things.el= functions do not error. Motion functions return a position or =nil=.
+
+*** =forward-op=
+Arguments: =count=
+
+Behavior:
+- with a positive count, move to the nth next thing end
+- with a negative count, move to the nth previous thing beginning
+- don't move the point on failure (i.e. there are no (more) things to move to)
+
+The "next thing end" means either the end of the current thing or the end of the next thing if the point is already at the end of the current thing. The same applies to the "previous thing beginning."
+
+Some builtin ~forward-<thing>~ functions will actually do something else on failure like move to ~(point-min)~ or ~(point-max)~. ~things-forward~ will automatically prevent movement on failure by ensuring that ~forward-thing~ moves the point to a valid boundary position (using ~bounds-of-thing-at-point~). When implementing new things, you should follow the convention of doing nothing on failure, but builtin ~forward-<thing>~ functions should still be useable with =things.el=.
+
+Return value: doesn't matter; the recommended convention is to return the point on success or nil on failure
+
+**** Behavior for Nestable Things
+Currently it is fine to keep the same behavior and ignore nesting. See [[#forward-op-and-nestable-things][=forward-op= and Nestable Things]] for more information.
+
+*** =beginning-op=
+Arguments: none
+
+Behavior:
+- move to the beginning of the current thing
+- if no thing at point, do nothing instead
+
+Return value: doesn't matter; the recommended convention is to return the point on success or nil on failure
+
+*** =end-op=
+Arguments: none
+
+Behavior:
+- move to the end of the current thing
+- if no thing at point, do nothing instead
+
+Return value: doesn't matter; the recommended convention is to return the point on success or nil on failure
+
+*** =bounds-of-thing-at-point=
+Arguments: none
+
+Return value: the bounds of the current thing as a cons in the form =(beg . end)= or nil if there is no thing at the point
+
+*** =things-bounds-of-thing-at-point=
+This is the same as =bounds-of-thing-at-point= except that you can use the default ~bounds-of-thing-at-point~ implementation inside of it. For example, this is useful if the bounds returned by ~bounds-of-thing-at-point~ for a thing are usually correct but you need to additionally check an edge case, for example:
+#+begin_src emacs-lisp
+(defun my-<thing>-bounds ()
+  (let ((bounds (bounds-of-thing-at-point )))
+    (when (and bounds (my-extra-check bounds))
+      bounds)))
+
+(put 'things-bounds-of-thing-at-point 'my-<thing> #'my-<thing>-bounds)
+#+end_src
+
+*** =thing-at-point=
+Arguments: none
+
+Return value: a string corresponding to the current thing or nil if there is no thing at the point
+
+This operation is unnecessary to implement unless you need to do extra work to process the text for a thing. For example, the default url thing will add schemes (e.g. =http://=) to urls.
+
+*** =things-seek-op=
+Arguments: =thing= =count=
+
+Behavior: Seek to the next or previous =thing= =count= times. If there are no more things in the buffer, do nothing.
+
+Return value: The new position if able to move at least once or nil
+
+Note that this does not need to be guaranteed to move to a correct position. Things will check if the bounds actually change to determine how many times to call the seek function.
+
+*** =things-seeks-forward-begin=
+This is a boolean (not a function). Specify this as non-nil if the seeking function will move to the beginning of a thing in the forward direction (instead of to the end like =forward-op=).
+
+*** =things-seeks-backward-end=
+This is a boolean (not a function). Specify this as non-nil if the seeking function will move to the end of a thing in the backward direction (instead of to the beginning like =forward-op=).
+
+*** =things-overlay-position=
+Arguments: None
+
+Return value: the position to display an avy overlay at for the current thing or nil if no thing at the point
+
+This is used to determine where to put avy overlays at for remote things. It can move the point, but only the return value matters. If this operation is not implemented, avy overlays will be displayed at the beginning of each thing.
+
+# If seeking moves the point to the location the overlay should be placed at, this can be specified as =#'point= to prevent extra work. This probably won't have a significant effect on performance though.
+
+*** =things-get-<adjustment>=
+Arguments: =thing/bounds=
+
+Return value: An adjusted =thing/bounds=
+
+See [[#adjustments][Adjustments]] for more information.
+
+*** =things-inside=
+Arguments: =thing/bounds=
+
+Return value: An adjusted =thing/bounds=
+
+This is a special adjustment function that is to determine whether the point is "inside" a thing. This is used for constraints to determine when to using narrowing. Here's an example to show why the full bounds can't always be used:
+#+begin_src emacs-lisp
+;; the point is on a string but is not inside it
+|"foo"
+
+;; can't just always exclude a single character; here the point is still not
+;; inside the thing (a docstring)
+"|""Docstring"""
+#+end_src
+
+*** =things-extend-<>=
+Not implemented yet.
+
+** TODO Helpers for Implementing a Thing
+- ~things-return-point-if-changed~
+- ~things-move-with-count~
+- ~things-move-while-not~
+TODO
+
+** Implementing a Thing
+*** Bounds
+The first step for creating a thing is to define the operations necessary to get the bounds of a thing at the point. To do this, you can implement =forward-op=, =beginning-op= and =end-op=, =bounds-of-thing-at-point=, or =things-bounds-of-thing-at-point= (in increasing order of priority; i.e. if =things-bounds-of-thing-at-point= is defined, it will be used instead of the other operations).
+
+=beginning-op=, =end-op=, =bounds-of-thing-at-point=, and =things-bounds-of-thing-at-point= are only used for getting the bounds of a thing. =forward-op= is additionally used for seeking (unless =things-seek-op= is defined for the thing) and for motions (i.e. anything using ~things-forward~).
+
+Generally, it will be enough to just implement =forward-op=. In some cases, it may be simpler to separately implement =end-op= and =begin-op= or just =(things-)bounds-of-thing-at-point= since these do not need to need to handle moving between things  (i.e. they just return nil if there is no thing at the point).
+
+You can of course build =forward-op= on top of smaller functions (e.g. the equivalent of one of the other bounds operations). My recommendation would be to stick to =forward-op= and additionally implement =things-bounds-of-thing-at-point= if extra validation is required (see [[#things-bounds-of-thing-at-point][=things-bounds-of-thing-at-point=]] for more details).
+
+**** Using =forward-op= for Bounds
+Note that there is no =backward-op=; =forward-op= is used for backward movement as well when it is given a negative count. With a positive count, it should move to the next thing end (which can be the end of the current thing or the end of the next thing if the point is already at the end of the current thing) that number of times. With negative count, it should move to the previous thing beginning (which can be the beginning of the current or previous thing) that number of times.
+
+***** More Details on =forward-op=
+This section isn't strictly necessary to understand how to write a =forward-op= function, but it may make it more clear how =thing-at-point= uses =forward-op= to obtain the bounds of a thing.
+
+To summarize how =thingatpt= finds the bounds of the current thing using only =forward-op=, it will first call ~(forward-thing 1)~ and then ~(forward-thing -1)~ to attempt to find the beginning of the current thing. After that, it will call ~(forward-thing 1)~ again to get the end. If that method fails, it will then try ~(forward-thing -1)~ followed by ~(forward-thing 1)~ to get the end (and then ~(forward-thing -1)~ again to get the beginning). This procedure may not immediately make sense, so to briefly illustrate why this method is necessary, consider the following examples.
+
+In the following case, ~(forward-thing sentence 1)~ will correctly go to the end of the sentence, and ~(forward-thing 'sentence -1)~ will correctly go to the beginning of the current sentence:
+#+begin_src emacs-lisp
+In sente|nce middle.
+#+end_src
+
+However, if the point is already at the sentence end, for example, ~(forward-thing 'sentence 1)~ will move to the end of the /next/ sentence:
+#+begin_src emacs-lisp
+At sentence end.| Next sentence. Next sentence.
+;; after (forward-thing 'sentence 1)
+At sentence end. Next sentence.| Next sentence.
+#+end_src
+
+=thingatpt= can detect this failure by then running ~(forard-thing 'sentence -1)~:
+#+begin_src emacs-lisp
+At sentence end. |Next sentence. Next sentence.
+;; point is after original position: failure
+#+end_src
+
+If the original ~(forward-thing 'sentence 1)~ had moved to the end of the /current/ sentence, ~(forward-thing 'sentence -1)~ would have moved the point to the beginning of the current sentence, which has to either be before original position or the original position itself. Since the point is after the original position, we know this method failed and moved to the next sentence instead. However, =thingatpt= can then use ~(forward-thing 'sentence -1)~ instead to reliably move to the beginning of the current sentence. There are extra checks to handle some edge cases (e.g. the second method actually calls ~(forward-thing -1)~, ~(forward-thing 1)~, and then ~(forward-thing -1)~), but these are the basic steps used to get the bounds of a thing; if you want to learn more, I'd recommend looking at ~bounds-of-thing-at-point~ directly as it is only around 50 LOC.
+
+**** Using =beginning-op= and =end-op= or =(things-)bounds-of-thing-at-point= for Bounds
+When =beginning-op= and =end-op= are implemented for a thing, =thingatpt= will use them instead of =forward-op= to move to the beginning and end of the current thing in order to get its bounds. Alternatively, if =(things-)bounds-of-thing-at-point= exists, it will be used directly to obtain the thing bounds. Note that ~things-beginning~ and ~things-end~ call ~things-bounds~ to get and move to a thing's beginning or end (the same is true for the builtin ~beginning-of-thing~ and ~end-of-thing~), so you do not need to explicitly define =beginning-op= or =end-op= if you've already implemented/defined =bounds-of-thing-at-point=. 
+
+For example, this is how the builtin buffer thing is implemented:
+#+begin_src emacs-lisp
+(put 'buffer 'end-op (lambda () (goto-char (point-max))))
+(put 'buffer 'beginning-op (lambda () (goto-char (point-min))))
+#+end_src
+
+Alternatively, it could be implemented like this:
+#+begin_src emacs-lisp
+(defun my-buffer-bounds ()
+  (cons (point-min) (point-max)))
+(put 'buffer 'bounds-of-thing-at-point #'my-buffer-bounds)
+#+end_src
+
+**** Rules for Handling Bounds Ambiguity
+***** Behavior at the End of a Thing
+The behavior of builtin things is inconsistent. Consider the following examples:
+#+begin_src emacs-lisp
+;; with
+foo| bar
+;; (thing-at-point 'word) is "foo"
+
+;; similarly, with
+(foo)|
+;; (thing-at-point 'sexp) is "(foo)"
+
+;; on the other hand, with
+(foo)|
+;; (thing-at-point 'list) is nil
+#+end_src
+
+It should be preferred to always return the bounds at the end of a thing when there are no other things at the point.
+
+***** Bordering Non-Nestable Things
+When the point on the border of two things, prefer the thing that the point starts at. For example, here the bounds of ="bar"= should be returned for a quote thing:
+#+begin_src emacs-lisp
+"foo"|"bar"
+#+end_src
+
+***** Bordering Nestable Things
+Like with non-nestable things, always prefer a thing that starts at the point. The behavior =things.el= adopts is similar to that of the builtin =list= thing (except to also return a list's bounds at its end). Below are some examples of the expected behavior.
+
+Return foo list bounds:
+#+begin_src emacs-lisp
+|(foo)
+#+end_src
+
+Return foo list bounds:
+#+begin_src emacs-lisp
+(progn |(foo))
+#+end_src
+
+Return bar list bounds:
+#+begin_src emacs-lisp
+(progn (foo)|(bar))
+#+end_src
+
+If at the end of thing, use the bounds for that thing only at the top-level. Return foo list bounds:
+#+begin_src emacs-lisp
+(foo)|
+#+end_src
+
+Return progn list bounds:
+#+begin_src emacs-lisp
+(progn (foo)|)
+#+end_src
+
+Return progn list bounds:
+#+begin_src emacs-lisp
+(progn (foo)| (bar))
+#+end_src
+
+**** =forward-op= and Nestable Things
+The behavior =forward-op= should have for non-nestable things is very clear, but how it should behave for nestable things can be confusing. The builtin ~forward-list~ will go to the next list end or previous list beginning at the same nesting depth. This means that it is not suitable for determining the bounds of the current list because it will fail to go to the end of it from inside it. Because it can't exit nesting, it is also not suitable for seeking or collecting things.
+
+Because of this, it is recommended to implement the other operations for getting the bounds of nestable things instead of =forward-op=. There is not currently any behavior required by =things.el= for =forward-op= for a nestable thing.
+
+You could copy the behavior of ~forward-list~ if you wanted, but this would be comparatively difficult to implement and could be done more easily with constraints (which could be used to restrict movement to the curernt nesting level). Arguably, ~forward-list~ isn't particularly useful interactively since it will often do nothing.
+
+Another alternative would be to implement =forward-op= like a combination of ~forward-list~, ~up-list~, and ~backward-up-list~, so that it could actually be used to get the bounds of a thing. However, this would also make a potentially confusing motion, and motions like ~up-list~ and ~backward-up-list~ could also be generated automatically. You may need to implement helpers like ~up-list~, but it is recommended to use them in =begin-op= and =end-op= or in =(things-)bounds-of-thing-at-point= instead.
+
+My recommendation is to implement =forward-op= the same way as for non-nestable things. It should go to the next thing end or previous thing beginning ignoring nesting. This is comparably simple to understand and easy to implement. Note that if =bounds-of-thing-at-point= and =things-seek-op= are both implemented, =forward-op= is only used for motions (i.e. ~things-forward~ and the ~things-forward-(begin|end)~ functions). By implementing =forward-op= the same as for non-nestable things, ~things-forward-(begin|end)~ will continue to work as expected.
+
+If you think another behavior would be ideal, please make an issue.
+
+*** Seeking
+Seeking is used by ~things-seek~, ~things-next-bounds~, ~things-previous-bounds~, and ~things-remote-bounds~. For non-nestable things, =forward-op= is also used for seeking, and implementing =things-seek-op= is unnecessary. =things-seek-op= exists for nestable things because =forward-op= is not suitable for seeking. To illustrate why that is, here are some possible behaviors for =thing-seek-op=:
+1. Go to the next thing beginning with a positive count or to the previous thing beginning with a negative count (=things-overlay-position= unnecessary)
+2. Go to the next thing beginning or end with a positive count or to the previous thing beginning or end with a positive count (=things-overlay-position= required to consistently display the overlay at the start)
+3. Go to the next thing beginning with a positive count or to the previous thing end with a negative count (opposite of =forward-op=; probably just as undesirable since it will be impossible to have next/previous text objects work on things that start before the point or end after the point)
+4. Go to the next thing end with a positive count or to the previous thing beginning with a negative count. This is also not ideal when you consider the effect on next/previous text objects.
+
+With 1, seeking will have this behavior:
+#+begin_src emacs-lisp
+(foo (bar (|baz)) (qux))
+;; dinl (evil keys)
+(foo (bar (|baz)) ())
+#+end_src
+
+With 2, =dinl= will delete the next list, even if it started before the point:
+#+begin_src emacs-lisp
+(foo (bar (|baz)) (qux))
+;; dinl (evil keys)
+(foo (|) (qux))
+#+end_src
+
+=things.el= does not currently standardize how seeking should behave for nestable things. For now, I recommend the first behavior since it consistently acts on openining delimiters and is easy to implement.
+
+If your =things-seek-op= moves forward to the beginning of a thing (as suggested), you will need to set =seeks-forward-begin= to non-nil for that thing. If it moves backward to the end of a thing, you will need to set =seeks-backward-end= to non-nil.
+
+=things-overlay-position= is used when collecting text object locations during remote selection to obtain the positions to put overlays at for each thing. For example, if =things-seek-op= sometimes or always moves the point to a thing end, and you only want avy overlays to appear on thing beginnings, you could implement =things-overlay-position= like this:
+#+begin_src emacs-lisp
+(defun my-thing-overlay-position ()
+  (beginning-of-thing 'my-thing))
+
+(put 'my-thing 'things-overlay-position #'my-thing-overlay-position)
+#+end_src
+
+By default, things will use the current thing beginning as the overlay position, so you do not actually need to implement =things-overlay-position= unless you want overlays to sometimes or always be at the end of a thing (or some other position).
+
+Also note that remote selection will automatically sort the collected positions, so it doesn't matter if the overlay positions are not found in order.
+
+*** Defining Adjustments
+It is required to implement =things-inside= for constraints. Implementing =things-get-<adjustment>= is necessary for that adjustment to be supported. The adjustments that =things.el= has default implementations for are =inner=, =a=, =inside=, =around=, and =linewise=. =linewise= just expands bounds to encompass full lines and does not need to be reimplemented. =a= and =around= will grow the bounds by whitespace on the right or on the left (preferably on the right). The default for =inner= is to use the bounds as they are. =inside= will use the inner adjustment and then shrink by whitespace on both sides.
+
+The default behavior of =a=, =around=, and =inner= is suitable for things like words that don't have surrounding delimiters. Things like quotes and parens need customized adjustments. Here is an example of how the adjustments for =things-string= are implemented:
+
+#+begin_src emacs-lisp
+(defun things-get-inner-string (thing/bounds)
+  "Shrink THING/BOUNDS to exclude `things-string-regxep' on both sides."
+  (things-shrink-by-regexp thing/bounds
+                           things-string-regexp
+                           things-string-regexp))
+
+(put 'things-string 'things-inside #'things-get-inner-string)
+(put 'things-string 'things-get-inner #'things-get-inner-string)
+;; default things-get-inside is fine
+(put 'things-string 'things-get-a #'identity)
+;; default things-get-around is fine
+#+end_src
+
+*** Defining Custom Extension Behavior
+TODO
 
 * =things-evil.el=
 ** Summary
