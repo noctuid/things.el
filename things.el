@@ -72,6 +72,7 @@ thing (e.g. '(paren :adjustment inner ...) -> 'paren)."
       (car thing)
     thing))
 
+;; TODO make part of API?
 (defun things--alteration (thing alteration)
   "Return THING's value for ALTERATION if it exists."
   (when (things--altered-thing-p thing)
@@ -456,7 +457,8 @@ corresponding to the thing that the point is at the end of."
     (or bounds-at-previous-char bounds)))
 
 (defun things--try-seek (thing &optional count)
-  "Call THING's things-seek-op or `things-forward' with COUNT."
+  "Call THING's things-seek-op or `things-forward' with COUNT.
+Return the new position if able to seek at least once. Otherwise return nil."
   (unless count
     (setq count 1))
   (things--run-motion-op-or thing ('things-seek-op thing count)
@@ -1149,8 +1151,7 @@ the point is on a THING."
   (let ((overlay-op (things--get thing 'things-overlay-position)))
     (if overlay-op
         (save-excursion
-          (funcall overlay-op)
-          (point))
+          (funcall overlay-op))
       (car (things-base-bounds thing)))))
 
 (defun things--check-predicate (thing predicate)
@@ -1877,6 +1878,7 @@ beginning or end at the buffer end."
                                 (looking-at separator))))
                  bounds)
              bounds))))
+  (put name 'things-seek-op #'things--seek-separator)
   (put name 'things-get-inner
        (lambda (thing/bounds)
          (things-shrink-by-regexp thing/bounds separator nil)))
