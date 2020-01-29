@@ -195,15 +195,29 @@ expands to `evil-define-command', which returns the function)."
      (setq things--push-jump (point-marker))
      ,@body))
 
-(defun things-evil--maybe-define-keys (hooks prefix infix keys def)
+(defun things-evil--maybe-define-keys (keymaps hooks prefix infix keys def
+                                               &optional use-general)
   "Helper function used to bind keys.
-When HOOKS is non-nil, add a function to each hook to bind the keys locally.
-Otherwise bind the keys in the global visual and operator state maps. The keys
-will be constructed by combining PREFIX, INFIX, and entries in KEYS. If PREFIX
-or INFIX is nil, no keybindings will be made. If INFIX is non-nil but not a
-string, it will be excluded. All keys will be bound to DEF."
+When KEYMAPS is non-nil, bind the keys in the operator and visual states for
+those keymaps. When HOOKS is non-nil, add a function to each hook to bind the
+keys locally. Otherwise bind the keys in the global visual and operator state
+maps.
+
+The keymaps in KEYMAPS should be symbols (e.g. 'emacs-lisp-mode-map not
+emacs-lisp-mode). KEYMAPS and HOOKS can either be lists or a single item.
+
+The keys will be constructed by combining PREFIX, INFIX, and entries in
+KEYS. If PREFIX or INFIX or KEYS is nil, no keybindings will be made. If INFIX
+is non-nil but not a string, it will be excluded. All keys will be bound to
+DEF.
+
+If USE-GENERAL is non-nil, bind the keys using general.el."
   (when (stringp keys)
     (setq keys (list keys)))
+  (unless (listp hooks)
+    (setq hooks (list hooks)))
+  (unless (listp keymaps)
+    (setq keymaps (list keymaps)))
   (when (and prefix infix)
     (while keys
       (let ((key (concat prefix
@@ -211,16 +225,31 @@ string, it will be excluded. All keys will be bound to DEF."
                              infix
                            nil)
                          (pop keys))))
-        (if hooks
-            (dolist (hook hooks)
-              (add-hook
-               hook
-               `(lambda ()
-                  (define-key evil-visual-state-local-map ,key #',def)
-                  (define-key evil-operator-state-local-map ,key #',def))
-               t))
-          (define-key evil-operator-state-map key def)
-          (define-key evil-visual-state-map key def))))))
+        (cond ((or keymaps hooks)
+               (dolist (keymap keymaps)
+                 (dolist (keymap keymaps)
+                   (if use-general
+                       ;; TODO are there issues with this? maybe try
+                       ;; `evil-define-minor-mode-key'
+                       (evil-define-key* '(operator visual) (symbol-value keymap)
+                                         key def)
+                     (general-define-key '(operator visual) keymap key def))))
+               (dolist (hook hooks)
+                 (add-hook
+                  hook
+                  (if use-general
+                      `(lambda ()
+                         (general-define-key '(visual operator) 'local
+                                             ,key #',def))
+                    `(lambda ()
+                       (define-key evil-visual-state-local-map ,key #',def)
+                       (define-key evil-operator-state-local-map ,key #',def)))
+                  t)))
+              (t
+               (if use-general
+                   (general-define-key '(visual operator) key def)
+                 (define-key evil-operator-state-map key def)
+                 (define-key evil-visual-state-map key def))))))))
 
 ;; TODO refactor to reduce code duplication
 (cl-defmacro things-evil--define-regular-text-object (name adjustment things
@@ -290,8 +319,8 @@ string, it will be excluded. All keys will be bound to DEF."
         (things-remote-bounds ',adjusted-things)
         type))))
 
+;; TODO make name optional? (not as useful for non-composite)
 (cl-defmacro things-evil-define (name things &key
-                                      (name-prefix "things-evil-")
                                       (inner-key "i")
                                       (a-key "a")
                                       (inside-key "I")
@@ -300,7 +329,10 @@ string, it will be excluded. All keys will be bound to DEF."
                                       (last-key "l")
                                       (remote-key "r")
                                       keys
+                                      keymaps
                                       hooks)
+  "...
+THINGS should not contain adjustments."
   `(progn
      ,@(cl-loop for (adjustment prefix-key) in `((inner ,inner-key)
                                                  (a ,a-key)
@@ -309,16 +341,16 @@ string, it will be excluded. All keys will be bound to DEF."
                 collect
                 `(progn
                    (things-evil--maybe-define-keys
-                    ,hooks ,prefix-key t ,keys
+                    ,keymaps ,hooks ,prefix-key t ,keys
                     (things-evil--define-regular-text-object ,name ,adjustment ,things))
                    (things-evil--maybe-define-keys
-                    ,hooks ,prefix-key ,next-key ,keys
+                    ,keymaps ,hooks ,prefix-key ,next-key ,keys
                     (things-evil--define-next-text-object ,name ,adjustment ,things))
                    (things-evil--maybe-define-keys
-                    ,hooks ,prefix-key ,last-key ,keys
+                    ,keymaps ,hooks ,prefix-key ,last-key ,keys
                     (things-evil--define-last-text-object ,name ,adjustment ,things))
                    (things-evil--maybe-define-keys
-                    ,hooks ,prefix-key ,remote-key ,keys
+                    ,keymaps ,hooks ,prefix-key ,remote-key ,keys
                     (things-evil--define-remote-text-object ,name ,adjustment ,things))))))
 
 ;; TODO way to simultaneously create thing (would require `things-evil-define'

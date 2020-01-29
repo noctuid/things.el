@@ -642,3 +642,16 @@ TODO
 * =things-evil.el=
 ** Summary
 =things-evil.el= is a package built on top of =things.el= for integration with evil. It is essentially the new =targets.el= and will likely be moved to a separate repo once both packages have stabilized more.
+
+** ~things-evil-define~
+*** =I= and =A= in Visual State
+The simplest way to use =I= and =A= for "inside" and "around" text objects in visual state but keep =I= and =A= as ~evil-insert~ and ~evil-append~ with a visual block selection is to conditionally bind =I= and =A= in a higher priority keymap:
+#+begin_src emacs-lisp
+;; if using general
+(general-def 'visual 'override
+  :predicate '(eq (evil-visual-type) 'block)
+  "I" #'evil-insert
+  "A" #'evil-append)
+#+end_src
+
+=things-evil= could implement a hack to check if it was binding over ~evil-insert~ or ~evil-append~ and then bind to a menu item that either called those commands with a visual block selection or dispatched to a keymap. This solution would be far more convoluted to implement, so I'm not planning on adding automatic support for overwriting =I= and =A=.
