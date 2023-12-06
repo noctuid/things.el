@@ -1615,6 +1615,7 @@ The match data of the each occurence is available for use in PREDICATE (with
 point to move the point (e.g. to skip past an invalid region). If there are no
 valid matches, return nil. BOUND, if specified, is a buffer position to bound
 the search."
+  ;; TODO based on the function name I would expect quoting to happen outside
   (setq regexp (regexp-quote regexp))
   (save-match-data
     (let ((start-pos (point))
@@ -1799,7 +1800,9 @@ With a negative count, go to the previous valid beginning of the pair."
   (put name 'things-overlay-position #'point)
   (put name 'things-get-inner
        (lambda (thing/bounds)
-         (things-shrink-by-regexp thing/bounds open close)))
+         (things-shrink-by-regexp thing/bounds
+                                  (regexp-quote open)
+                                  (regexp-quote close))))
   (put name 'things-get-a #'identity)
   name)
 
